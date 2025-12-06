@@ -73,6 +73,7 @@ static const char *DsLogLevelStrings[] = {
         ds_log(DS_ERROR, "UNREACHABLE CODE: %s::%s::%d\n", __FILE__, __func__, __LINE__); \
         abort();                                                                          \
     } while (0)
+#define DS_UNUSED(x) (void)(x)
 
 #ifndef DS_DA_INIT_CAPACITY
 #define DS_DA_INIT_CAPACITY 1024
@@ -87,34 +88,34 @@ static const char *DsLogLevelStrings[] = {
  * This will create a dynamic array of integers like this:
 ```c
 typedef struct {
-    int *items;
-    size_t count;
+    int *data;
+    size_t length;
     size_t capacity;
 } my_array;
 ```
  */
 #define ds_da_declare(name, type) \
     typedef struct {              \
-        type *items;              \
-        size_t count;             \
+        type *data;               \
+        size_t length;            \
         size_t capacity;          \
     } name
 
 /**
  * Reserve space in a dynamic array.
  */
-#define ds_da_reserve(da, expected_capacity)                                              \
-    do {                                                                                  \
-        if ((size_t)(expected_capacity) > (da)->capacity) {                               \
-            if ((da)->capacity == 0) {                                                    \
-                (da)->capacity = DS_DA_INIT_CAPACITY;                                     \
-            }                                                                             \
-            while ((size_t)(expected_capacity) > (da)->capacity) {                        \
-                (da)->capacity = (da)->capacity + ((da)->capacity >> 1);                  \
-            }                                                                             \
-            (da)->items = DS_REALLOC((da)->items, (da)->capacity * sizeof(*(da)->items)); \
-            assert((da)->items != NULL);                                                  \
-        }                                                                                 \
+#define ds_da_reserve(da, expected_capacity)                                           \
+    do {                                                                               \
+        if ((size_t)(expected_capacity) > (da)->capacity) {                            \
+            if ((da)->capacity == 0) {                                                 \
+                (da)->capacity = DS_DA_INIT_CAPACITY;                                  \
+            }                                                                          \
+            while ((size_t)(expected_capacity) > (da)->capacity) {                     \
+                (da)->capacity = (da)->capacity + ((da)->capacity >> 1);               \
+            }                                                                          \
+            (da)->data = DS_REALLOC((da)->data, (da)->capacity * sizeof(*(da)->data)); \
+            assert((da)->data != NULL);                                                \
+        }                                                                              \
     } while (0)
 
 /**
@@ -127,10 +128,10 @@ typedef struct {
     ds_da_append(&a, 42);
  ```
  */
-#define ds_da_append(da, item)                \
-    do {                                      \
-        ds_da_reserve((da), (da)->count + 1); \
-        (da)->items[(da)->count++] = (item);  \
+#define ds_da_append(da, item)                 \
+    do {                                       \
+        ds_da_reserve((da), (da)->length + 1); \
+        (da)->data[(da)->length++] = (item);   \
     } while (0)
 
 /**
@@ -144,37 +145,37 @@ typedef struct {
     ds_da_append_many(&a, (int[]){1, 2, 3}, 3);
  ```
  */
-#define ds_da_append_many(da, data, size)          \
-    do {                                           \
-        if ((size) == 0) break;                    \
-        ds_da_reserve((da), (da)->count + (size)); \
-        memcpy(&(da)->items[(da)->count], (data),  \
-               (size) * sizeof(*(da)->items));     \
-        (da)->count += (size);                     \
+#define ds_da_append_many(da, items, size)          \
+    do {                                            \
+        if ((size) == 0) break;                     \
+        ds_da_reserve((da), (da)->length + (size)); \
+        memcpy(&(da)->data[(da)->length], (items),  \
+               (size) * sizeof(*(da)->data));       \
+        (da)->length += (size);                     \
     } while (0)
 
 /**
  * Pop an item from a dynamic array.
  */
-#define ds_da_pop(da)                \
-    ({                               \
-        assert((da)->items != NULL); \
-        (da)->items[--(da)->count];  \
+#define ds_da_pop(da)               \
+    ({                              \
+        assert((da)->data != NULL); \
+        (da)->data[--(da)->length]; \
     })
 
 /**
- * Remove a range of items from a dynamic array.
+ * Remove a range of data from a dynamic array.
  * Example:
  *   `ds_da_remove(&a, 1, 2); // [1,2,3,4,5] -> [1,4,5]`
  */
-#define ds_da_remove(da, idx, del)                                              \
-    do {                                                                        \
-        if ((da)->items && (idx) < (da)->count) {                               \
-            memmove(&(da)->items[(idx)], &(da)->items[(idx) + (del)],           \
-                    ((da)->count - (idx) - (del)) * sizeof(*(da)->items));      \
-            (da)->count = (da)->count > (del) ? (da)->count - (del) : 0;        \
-            memset(&(da)->items[(da)->count], 0, (del) * sizeof(*(da)->items)); \
-        }                                                                       \
+#define ds_da_remove(da, idx, del)                                             \
+    do {                                                                       \
+        if ((da)->data && (idx) < (da)->length) {                              \
+            memmove(&(da)->data[(idx)], &(da)->data[(idx) + (del)],            \
+                    ((da)->length - (idx) - (del)) * sizeof(*(da)->data));     \
+            (da)->length = (da)->length > (del) ? (da)->length - (del) : 0;    \
+            memset(&(da)->data[(da)->length], 0, (del) * sizeof(*(da)->data)); \
+        }                                                                      \
     } while (0)
 
 /**
@@ -184,12 +185,12 @@ typedef struct {
  */
 #define ds_da_insert(da, idx, item)                            \
     do {                                                       \
-        if ((idx) > (da)->count) (idx) = (da)->count;          \
-        ds_da_reserve((da), (da)->count + 1);                  \
-        memmove(&(da)->items[(idx) + 1], &(da)->items[(idx)],  \
-                ((da)->count - (idx)) * sizeof(*(da)->items)); \
-        (da)->items[(idx)] = (item);                           \
-        (da)->count++;                                         \
+        if ((idx) > (da)->length) (idx) = (da)->length;        \
+        ds_da_reserve((da), (da)->length + 1);                 \
+        memmove(&(da)->data[(idx) + 1], &(da)->data[(idx)],    \
+                ((da)->length - (idx)) * sizeof(*(da)->data)); \
+        (da)->data[(idx)] = (item);                            \
+        (da)->length++;                                        \
     } while (0)
 
 /**
@@ -206,30 +207,30 @@ typedef struct {
 /**
  * Get a pointer to the last item of a dynamic array, or NULL if the array is empty.
  */
-#define ds_da_last(da) ((da)->count > 0 ? &(da)->items[(da)->count - 1] : NULL)
+#define ds_da_last(da) ((da)->length > 0 ? &(da)->data[(da)->length - 1] : NULL)
 
 /**
  * Get a pointer to the first item of a dynamic array, or NULL if the array is empty.
  */
-#define ds_da_first(da) ((da)->count > 0 ? &(da)->items[0] : NULL)
+#define ds_da_first(da) ((da)->length > 0 ? &(da)->data[0] : NULL)
 
 /**
  * Reset a dynamic array. It will not free the underlying memory.
  */
 #define ds_da_zero(da)      \
     do {                    \
-        (da)->count = 0;    \
+        (da)->length = 0;   \
         (da)->capacity = 0; \
-        (da)->items = NULL; \
+        (da)->data = NULL;  \
     } while (0)
 
 /**
  * Free a dynamic array.
  */
-#define ds_da_free(da)                         \
-    do {                                       \
-        if ((da)->items) DS_FREE((da)->items); \
-        ds_da_zero(da);                        \
+#define ds_da_free(da)                       \
+    do {                                     \
+        if ((da)->data) DS_FREE((da)->data); \
+        ds_da_zero(da);                      \
     } while (0)
 
 /**
@@ -237,63 +238,63 @@ typedef struct {
  * Example:
  *   `ds_da_foreach(&a, item) { printf("%d\n", item); }`
  */
-#define ds_da_foreach(da, var)   \
-    __typeof__((da)->items) var; \
-    for (size_t _i = 0; _i < (da)->count && (var = &(da)->items[_i]); _i++)
+#define ds_da_foreach(da, var)  \
+    __typeof__((da)->data) var; \
+    for (size_t _i = 0; _i < (da)->length && (var = &(da)->data[_i]); _i++)
 
 /**
  * Find an item in a dynamic array. It returns a pointer to the item, or NULL if not found.
  * Example:
  *   `int *x = ds_da_find(&a, e == 0);`
  */
-#define ds_da_find(da, expr)                                \
-    ({                                                      \
-        __typeof__(*(da)->items) *_r = NULL;                \
-        for (size_t _i = 0; _i < (da)->count; _i++) {       \
-            __typeof__(*(da)->items) *e = &(da)->items[_i]; \
-            if (expr) {                                     \
-                _r = &(da)->items[_i];                      \
-                break;                                      \
-            }                                               \
-        }                                                   \
-        _r;                                                 \
+#define ds_da_find(da, expr)                              \
+    ({                                                    \
+        __typeof__(*(da)->data) *_r = NULL;               \
+        for (size_t _i = 0; _i < (da)->length; _i++) {    \
+            __typeof__(*(da)->data) *e = &(da)->data[_i]; \
+            if (expr) {                                   \
+                _r = &(da)->data[_i];                     \
+                break;                                    \
+            }                                             \
+        }                                                 \
+        _r;                                               \
     })
 
 /**
  * Get the index of an item in a dynamic array.
  * It returns the index of the item, or -1 if not found.
  */
-#define ds_da_index_of(da, expr)                            \
-    ({                                                      \
-        int _r = -1;                                        \
-        for (size_t _i = 0; _i < (da)->count; _i++) {       \
-            __typeof__(*(da)->items) *e = &(da)->items[_i]; \
-            if (expr) {                                     \
-                _r = (int)_i;                               \
-                break;                                      \
-            }                                               \
-        }                                                   \
-        _r;                                                 \
+#define ds_da_index_of(da, expr)                          \
+    ({                                                    \
+        int _r = -1;                                      \
+        for (size_t _i = 0; _i < (da)->length; _i++) {    \
+            __typeof__(*(da)->data) *e = &(da)->data[_i]; \
+            if (expr) {                                   \
+                _r = (int)_i;                             \
+                break;                                    \
+            }                                             \
+        }                                                 \
+        _r;                                               \
     })
 
 /**
  * Dynamic string builder.
  */
-ds_da_declare(DsStringBuilder, char);
+ds_da_declare(DsString, char);
 
-void _ds_sb_append(DsStringBuilder *sb, ...) {
+void _ds_sb_append(DsString *sb, ...) {
     va_list args;
     va_start(args, sb);
     const char *str;
     while ((str = va_arg(args, const char *))) {
         size_t len = strlen(str);
-        ds_da_reserve(sb, sb->count + len + 1);
-        memcpy(sb->items + sb->count, str, len);
-        sb->count += len;
+        ds_da_reserve(sb, sb->length + len + 1);
+        memcpy(sb->data + sb->length, str, len);
+        sb->length += len;
     }
     va_end(args);
-    ds_da_reserve(sb, sb->count + 1);
-    sb->items[sb->count] = '\0';
+    ds_da_reserve(sb, sb->length + 1);
+    sb->data[sb->length] = '\0';
 }
 
 /**
@@ -301,17 +302,17 @@ void _ds_sb_append(DsStringBuilder *sb, ...) {
  * Example:
  *   `ds_sb_appendf(&sb, "Hello, %s!", "World");`
  */
-void ds_sb_appendf(DsStringBuilder *sb, const char *fmt, ...) {
+void ds_sb_appendf(DsString *sb, const char *fmt, ...) {
     va_list args;
     va_start(args, fmt);
     int n = vsnprintf(NULL, 0, fmt, args);
     va_end(args);
     if (n > 0) {
-        ds_da_reserve(sb, sb->count + n + 1);
+        ds_da_reserve(sb, sb->length + n + 1);
         va_start(args, fmt);
-        vsnprintf(sb->items + sb->count, n + 1, fmt, args);
+        vsnprintf(sb->data + sb->length, n + 1, fmt, args);
         va_end(args);
-        sb->count += n;
+        sb->length += n;
     }
 }
 
@@ -320,20 +321,20 @@ void ds_sb_appendf(DsStringBuilder *sb, const char *fmt, ...) {
  * Example:
  *   `ds_sb_prependf(&sb, "Hello, %s!", "World");`
  */
-void ds_sb_prependf(DsStringBuilder *sb, const char *fmt, ...) {
+void ds_sb_prependf(DsString *sb, const char *fmt, ...) {
     va_list args;
     va_start(args, fmt);
     int n = vsnprintf(NULL, 0, fmt, args);
     va_end(args);
     if (n > 0) {
-        ds_da_reserve(sb, sb->count + n + 1);
-        char c0 = sb->items[0];
-        memmove(sb->items + n, sb->items, sb->count);
+        ds_da_reserve(sb, sb->length + n + 1);
+        char c0 = sb->data[0];
+        memmove(sb->data + n, sb->data, sb->length);
         va_start(args, fmt);
-        vsnprintf(sb->items, n + 1, fmt, args);
-        sb->items[n] = c0;
+        vsnprintf(sb->data, n + 1, fmt, args);
+        sb->data[n] = c0;
         va_end(args);
-        sb->count += n;
+        sb->length += n;
     }
 }
 
@@ -347,13 +348,13 @@ void ds_sb_prependf(DsStringBuilder *sb, const char *fmt, ...) {
 /**
  * Insert a string at a specific index in the string builder.
  */
-void ds_sb_insert(DsStringBuilder *sb, const char *str, size_t index) {
-    if (!sb || !str || index > sb->count) return;
+void ds_sb_insert(DsString *sb, const char *str, size_t index) {
+    if (!sb || !str || index > sb->length) return;
     size_t len = strlen(str);
-    ds_da_reserve(sb, sb->count + len + 1);
-    memmove(sb->items + index + len, sb->items + index, sb->count - index);
-    memcpy(sb->items + index, str, len);
-    sb->count += len;
+    ds_da_reserve(sb, sb->length + len + 1);
+    memmove(sb->data + index + len, sb->data + index, sb->length - index);
+    memcpy(sb->data + index, str, len);
+    sb->length += len;
 }
 
 /**
@@ -364,23 +365,23 @@ void ds_sb_insert(DsStringBuilder *sb, const char *str, size_t index) {
 /**
  * Check if a substring is included in the string builder.
  */
-bool ds_sb_include(const DsStringBuilder *sb, const char *substr) {
-    if (!sb || !substr || sb->count == 0 || strlen(substr) == 0) return false;
-    return strstr(sb->items, substr) != NULL;
+bool ds_sb_include(const DsString *sb, const char *substr) {
+    if (!sb || !substr || sb->length == 0 || strlen(substr) == 0) return false;
+    return strstr(sb->data, substr) != NULL;
 }
 
 /**
  * Trim leading whitespace from the string builder.
  */
-DsStringBuilder *ds_sb_ltrim(DsStringBuilder *sb) {
-    if (sb && sb->count > 0) {
+DsString *ds_sb_ltrim(DsString *sb) {
+    if (sb && sb->length > 0) {
         size_t i = 0;
-        while (i < sb->count && (sb->items[i] == ' ' || sb->items[i] == '\t' || sb->items[i] == '\n' || sb->items[i] == '\r')) {
+        while (i < sb->length && (sb->data[i] == ' ' || sb->data[i] == '\t' || sb->data[i] == '\n' || sb->data[i] == '\r')) {
             i++;
         }
         if (i > 0) {
-            memmove(sb->items, sb->items + i, sb->count - i + 1);
-            sb->count -= i;
+            memmove(sb->data, sb->data + i, sb->length - i + 1);
+            sb->length -= i;
         }
     }
     return sb;
@@ -389,15 +390,15 @@ DsStringBuilder *ds_sb_ltrim(DsStringBuilder *sb) {
 /**
  * Trim trailing whitespace from the string builder.
  */
-DsStringBuilder *ds_sb_rtrim(DsStringBuilder *sb) {
-    if (sb && sb->count > 0) {
-        size_t i = sb->count;
-        while (i > 0 && (sb->items[i - 1] == ' ' || sb->items[i - 1] == '\t' || sb->items[i - 1] == '\n' || sb->items[i - 1] == '\r')) {
+DsString *ds_sb_rtrim(DsString *sb) {
+    if (sb && sb->length > 0) {
+        size_t i = sb->length;
+        while (i > 0 && (sb->data[i - 1] == ' ' || sb->data[i - 1] == '\t' || sb->data[i - 1] == '\n' || sb->data[i - 1] == '\r')) {
             i--;
         }
-        if (i < sb->count) {
-            sb->items[i] = '\0';
-            sb->count = i;
+        if (i < sb->length) {
+            sb->data[i] = '\0';
+            sb->length = i;
         }
     }
     return sb;
@@ -406,7 +407,7 @@ DsStringBuilder *ds_sb_rtrim(DsStringBuilder *sb) {
 /**
  * Trim whitespace from the string builder.
  */
-inline DsStringBuilder *ds_sb_trim(DsStringBuilder *sb) {
+inline DsString *ds_sb_trim(DsString *sb) {
     return ds_sb_rtrim(ds_sb_ltrim(sb));
 }
 
@@ -513,8 +514,8 @@ typedef struct {
 } my_map_Kv;
 // Dynamic array of key-value pairs
 typedef struct {
-    my_map_Kv *items;
-    size_t count;
+    my_map_Kv *data;
+    size_t length;
     size_t capacity;
 } my_map_Da;
 // Hash map structure
@@ -544,22 +545,22 @@ typedef struct {
         size_t size;                        \
     } name
 
-#define _ds_hm_resize(hm)                                                                         \
-    do {                                                                                          \
-        size_t new_capacity = (hm)->table.count == 0 ? 1 : (hm)->table.count * 2;                 \
-        __typeof__((hm)->table) new_table = {0};                                                  \
-        ds_da_reserve(&new_table, new_capacity);                                                  \
-        new_capacity = new_table.count = new_table.capacity;                                      \
-        memset(new_table.items, 0, new_capacity * sizeof(*new_table.items));                      \
-        for (size_t _i = 0; _i < (hm)->table.count; _i++) {                                       \
-            for (size_t _j = 0; _j < (hm)->table.items[_i].count; _j++) {                         \
-                __typeof__((hm)->table.items[_i].items[_j]) kv = (hm)->table.items[_i].items[_j]; \
-                size_t _h = _ds_hm_hfn((hm), kv.key) % new_capacity;                              \
-                ds_da_append(&new_table.items[_h], kv);                                           \
-            }                                                                                     \
-        }                                                                                         \
-        ds_da_free(&(hm)->table);                                                                 \
-        (hm)->table = new_table;                                                                  \
+#define _ds_hm_resize(hm)                                                                     \
+    do {                                                                                      \
+        size_t new_capacity = (hm)->table.length == 0 ? 1 : (hm)->table.length * 2;           \
+        __typeof__((hm)->table) new_table = {0};                                              \
+        ds_da_reserve(&new_table, new_capacity);                                              \
+        new_capacity = new_table.length = new_table.capacity;                                 \
+        memset(new_table.data, 0, new_capacity * sizeof(*new_table.data));                    \
+        for (size_t _i = 0; _i < (hm)->table.length; _i++) {                                  \
+            for (size_t _j = 0; _j < (hm)->table.data[_i].length; _j++) {                     \
+                __typeof__((hm)->table.data[_i].data[_j]) kv = (hm)->table.data[_i].data[_j]; \
+                size_t _h = _ds_hm_hfn((hm), kv.key) % new_capacity;                          \
+                ds_da_append(&new_table.data[_h], kv);                                        \
+            }                                                                                 \
+        }                                                                                     \
+        ds_da_free(&(hm)->table);                                                             \
+        (hm)->table = new_table;                                                              \
     } while (0)
 
 /**
@@ -572,24 +573,24 @@ ds_hm_declare(my_map, int, const char *);
     ds_hm_set(&hm, 42, "Hello");
 ```
  */
-#define ds_hm_set(hm, key_v, val_v)                                                          \
-    do {                                                                                     \
-        if ((hm)->table.count == 0 || (hm)->size >= (hm)->table.count * DS_HM_LOAD_FACTOR) { \
-            _ds_hm_resize(hm);                                                               \
-        }                                                                                    \
-        __typeof__(*(hm)->table.items[0].items) kv = {.key = key_v, .value = val_v};         \
-        size_t _hash = _ds_hm_hfn((hm), (kv).key) % (hm)->table.count;                       \
-        size_t _i;                                                                           \
-        for (_i = 0; _i < (hm)->table.items[_hash].count; _i++) {                            \
-            if (_ds_hm_eqfn((hm), (hm)->table.items[_hash].items[_i].key, (kv).key)) {       \
-                (hm)->table.items[_hash].items[_i].value = (kv).value;                       \
-                break;                                                                       \
-            }                                                                                \
-        }                                                                                    \
-        if (_i == (hm)->table.items[_hash].count) {                                          \
-            ds_da_append(&(hm)->table.items[_hash], kv);                                     \
-            (hm)->size++;                                                                    \
-        }                                                                                    \
+#define ds_hm_set(hm, key_v, val_v)                                                            \
+    do {                                                                                       \
+        if ((hm)->table.length == 0 || (hm)->size >= (hm)->table.length * DS_HM_LOAD_FACTOR) { \
+            _ds_hm_resize(hm);                                                                 \
+        }                                                                                      \
+        __typeof__(*(hm)->table.data[0].data) kv = {.key = key_v, .value = val_v};             \
+        size_t _hash = _ds_hm_hfn((hm), (kv).key) % (hm)->table.length;                        \
+        size_t _i;                                                                             \
+        for (_i = 0; _i < (hm)->table.data[_hash].length; _i++) {                              \
+            if (_ds_hm_eqfn((hm), (hm)->table.data[_hash].data[_i].key, (kv).key)) {           \
+                (hm)->table.data[_hash].data[_i].value = (kv).value;                           \
+                break;                                                                         \
+            }                                                                                  \
+        }                                                                                      \
+        if (_i == (hm)->table.data[_hash].length) {                                            \
+            ds_da_append(&(hm)->table.data[_hash], kv);                                        \
+            (hm)->size++;                                                                      \
+        }                                                                                      \
     } while (0)
 
 /**
@@ -603,19 +604,19 @@ ds_hm_declare(my_map, int, const char *);
     printf("%s\n", *value);
  ```
  */
-#define ds_hm_try(hm, key_v)                                                              \
-    ({                                                                                    \
-        __typeof__(&(hm)->table.items[0].items[0].value) _val = NULL;                     \
-        if ((hm)->table.count) {                                                          \
-            size_t _hash = _ds_hm_hfn((hm), key_v) % (hm)->table.count;                   \
-            for (size_t _i = 0; _i < (hm)->table.items[_hash].count; _i++) {              \
-                if (_ds_hm_eqfn((hm), (hm)->table.items[_hash].items[_i].key, (key_v))) { \
-                    _val = &(hm)->table.items[_hash].items[_i].value;                     \
-                    break;                                                                \
-                }                                                                         \
-            }                                                                             \
-        }                                                                                 \
-        _val;                                                                             \
+#define ds_hm_try(hm, key_v)                                                            \
+    ({                                                                                  \
+        __typeof__(&(hm)->table.data[0].data[0].value) _val = NULL;                     \
+        if ((hm)->table.length) {                                                       \
+            size_t _hash = _ds_hm_hfn((hm), key_v) % (hm)->table.length;                \
+            for (size_t _i = 0; _i < (hm)->table.data[_hash].length; _i++) {            \
+                if (_ds_hm_eqfn((hm), (hm)->table.data[_hash].data[_i].key, (key_v))) { \
+                    _val = &(hm)->table.data[_hash].data[_i].value;                     \
+                    break;                                                              \
+                }                                                                       \
+            }                                                                           \
+        }                                                                               \
+        _val;                                                                           \
     })
 
 /**
@@ -627,17 +628,17 @@ ds_hm_declare(my_map, int, const char *);
  const char *value = ds_hm_get(&hm, 42);
  ```
  */
-#define ds_hm_get(hm, key_v)                                                          \
-    ({                                                                                \
-        __typeof__((hm)->table.items[0].items[0].value) _val = {0};                   \
-        size_t _hash = _ds_hm_hfn((hm), key_v) % (hm)->table.count;                   \
-        for (size_t _i = 0; _i < (hm)->table.items[_hash].count; _i++) {              \
-            if (_ds_hm_eqfn((hm), (hm)->table.items[_hash].items[_i].key, (key_v))) { \
-                _val = (hm)->table.items[_hash].items[_i].value;                      \
-                break;                                                                \
-            }                                                                         \
-        }                                                                             \
-        _val;                                                                         \
+#define ds_hm_get(hm, key_v)                                                        \
+    ({                                                                              \
+        __typeof__((hm)->table.data[0].data[0].value) _val = {0};                   \
+        size_t _hash = _ds_hm_hfn((hm), key_v) % (hm)->table.length;                \
+        for (size_t _i = 0; _i < (hm)->table.data[_hash].length; _i++) {            \
+            if (_ds_hm_eqfn((hm), (hm)->table.data[_hash].data[_i].key, (key_v))) { \
+                _val = (hm)->table.data[_hash].data[_i].value;                      \
+                break;                                                              \
+            }                                                                       \
+        }                                                                           \
+        _val;                                                                       \
     })
 
 /**
@@ -647,18 +648,18 @@ ds_hm_declare(my_map, int, const char *);
  const char **value = ds_hm_remove(&hm, 42);
  ```
  */
-#define ds_hm_remove(hm, key_v)                                                     \
-    ({                                                                              \
-        __typeof__(&(hm)->table.items[0].items[0].value) _val = NULL;               \
-        size_t _hash = _ds_hm_hfn((hm), key_v) % (hm)->table.count;                 \
-        for (size_t _i = 0; _i < (hm)->table.items[_hash].count; _i++) {            \
-            if (_ds_hm_eqfn((hm), (hm)->table.items[_hash].items[_i].key, key_v)) { \
-                _val = &(hm)->table.items[_hash].items[_i].value;                   \
-                ds_da_remove(&(hm)->table.items[_hash], _i, 1);                     \
-                (hm)->size--;                                                       \
-            }                                                                       \
-        }                                                                           \
-        _val;                                                                       \
+#define ds_hm_remove(hm, key_v)                                                   \
+    ({                                                                            \
+        __typeof__(&(hm)->table.data[0].data[0].value) _val = NULL;               \
+        size_t _hash = _ds_hm_hfn((hm), key_v) % (hm)->table.length;              \
+        for (size_t _i = 0; _i < (hm)->table.data[_hash].length; _i++) {          \
+            if (_ds_hm_eqfn((hm), (hm)->table.data[_hash].data[_i].key, key_v)) { \
+                _val = &(hm)->table.data[_hash].data[_i].value;                   \
+                ds_da_remove(&(hm)->table.data[_hash], _i, 1);                    \
+                (hm)->size--;                                                     \
+            }                                                                     \
+        }                                                                         \
+        _val;                                                                     \
     })
 
 /**
@@ -671,13 +672,13 @@ ds_hm_foreach(&hm, key, value) {
 }
 ```
  */
-#define ds_hm_foreach(hm, key_var, val_var)                                         \
-    __typeof__(&(hm)->table.items[0].items[0].key) key_var;                         \
-    __typeof__(&(hm)->table.items[0].items[0].value) val_var;                       \
-    for (size_t _i = 0; _i < (hm)->table.count; _i++)                               \
-        for (size_t _j = 0; _j < (hm)->table.items[_i].count &&                     \
-                            ((key_var) = &(hm)->table.items[_i].items[_j].key,      \
-                            (val_var) = &(hm)->table.items[_i].items[_j].value, 1); \
+#define ds_hm_foreach(hm, key_var, val_var)                                       \
+    __typeof__(&(hm)->table.data[0].data[0].key) key_var;                         \
+    __typeof__(&(hm)->table.data[0].data[0].value) val_var;                       \
+    for (size_t _i = 0; _i < (hm)->table.length; _i++)                            \
+        for (size_t _j = 0; _j < (hm)->table.data[_i].length &&                   \
+                            ((key_var) = &(hm)->table.data[_i].data[_j].key,      \
+                            (val_var) = &(hm)->table.data[_i].data[_j].value, 1); \
              _j++)
 
 /**
@@ -685,12 +686,12 @@ ds_hm_foreach(&hm, key, value) {
  * It will not free the keys or values themselves.
  * You should free the keys and values separately if needed.
  */
-#define ds_hm_free(hm)                                      \
-    do {                                                    \
-        for (size_t _i = 0; _i < (hm)->table.count; _i++) { \
-            ds_da_free(&(hm)->table.items[_i]);             \
-        }                                                   \
-        ds_da_free(&(hm)->table);                           \
+#define ds_hm_free(hm)                                       \
+    do {                                                     \
+        for (size_t _i = 0; _i < (hm)->table.length; _i++) { \
+            ds_da_free(&(hm)->table.data[_i]);               \
+        }                                                    \
+        ds_da_free(&(hm)->table);                            \
     } while (0)
 
 /**
@@ -802,11 +803,11 @@ typedef struct {
  * Read the entire contents of a file into a string builder.
  * Example:
 ```c
-DsStringBuilder sb = {0};
+DsString sb = {0};
 ds_read_entire_file("path/to/file.txt", &sb);
 ```
  */
-bool ds_read_entire_file(const char *path, DsStringBuilder *sb) {
+bool ds_read_entire_file(const char *path, DsString *sb) {
     bool result = false;
 
     FILE *f = fopen(path, "rb");
@@ -816,11 +817,11 @@ bool ds_read_entire_file(const char *path, DsStringBuilder *sb) {
     if (s < 0) goto cleanup;
     if (fseek(f, 0, SEEK_SET) < 0) goto cleanup;
 
-    size_t size = sb->count + s;
+    size_t size = sb->length + s;
     ds_da_reserve(sb, size);
-    fread(sb->items + sb->count, s, 1, f);
+    fread(sb->data + sb->length, s, 1, f);
     if (ferror(f)) goto cleanup;
-    sb->count = size;
+    sb->length = size;
     result = true;
 cleanup:
     if (!result)
@@ -834,18 +835,18 @@ cleanup:
  * Write the entire contents of a string builder to a file.
  * Example:
 ```c
-DsStringBuilder sb = {0};
+DsString sb = {0};
 ds_read_entire_file("path/to/file.txt", &sb);
 ds_write_entire_file("path/to/output.txt", &sb);
 ```
  */
-bool ds_write_entire_file(const char *path, const DsStringBuilder *sb) {
+bool ds_write_entire_file(const char *path, const DsString *sb) {
     bool result = false;
     FILE *f = fopen(path, "wb");
     if (f == NULL) goto cleanup;
 
-    const char *buf = sb->items;
-    size_t size = sb->count;
+    const char *buf = sb->data;
+    size_t size = sb->length;
     while (size > 0) {
         size_t n = fwrite(buf, 1, size, f);
         if (ferror(f)) goto cleanup;
@@ -864,8 +865,8 @@ typedef struct {
     size_t length;
 } DsStringIterator;
 
-DsStringIterator ds_sb_iter(const DsStringBuilder *sb) {
-    return (DsStringIterator){.data = sb->items, .length = sb->count};
+DsStringIterator ds_sb_iter(const DsString *sb) {
+    return (DsStringIterator){.data = sb->data, .length = sb->length};
 }
 DsStringIterator ds_cstr_iter(const char *data) {
     return (DsStringIterator){.data = data, .length = strlen(data)};
@@ -912,7 +913,7 @@ DsStringIterator ds_str_split(DsStringIterator *it, char sep) {
  */
 bool ds_mkdir_p(const char *path) {
     DsStringIterator iter = ds_cstr_iter(path);
-    DsStringBuilder tmp_path = {0};
+    DsString tmp_path = {0};
     if (iter.length && iter.data[0] == '/') ds_da_append(&tmp_path, '/');
 
     while (iter.length) {
@@ -921,9 +922,9 @@ bool ds_mkdir_p(const char *path) {
         if (part.length == 1 && part.data[0] == '.') continue;
         ds_da_append_many(&tmp_path, part.data, part.length);
         ds_sb_append(&tmp_path, "/");
-        if (mkdir(tmp_path.items, 0755) < 0) {
+        if (mkdir(tmp_path.data, 0755) < 0) {
             if (errno != EEXIST) {
-                ds_log(DS_ERROR, "Could not create directory `%s`: %s", tmp_path.items,
+                ds_log(DS_ERROR, "Could not create directory `%s`: %s", tmp_path.data,
                        strerror(errno));
                 ds_da_free(&tmp_path);
                 return false;
@@ -938,6 +939,7 @@ bool ds_mkdir_p(const char *path) {
 // Strip prefixes
 #define UNREACHABLE DS_UNREACHABLE
 #define TODO DS_TODO
+#define UNUSED DS_UNUSED
 #define log ds_log
 #define log_info ds_log_info
 #define log_debug ds_log_debug
@@ -983,7 +985,7 @@ bool ds_mkdir_p(const char *path) {
 #define ll_append ds_ll_append
 #define ll_pop ds_ll_pop
 #define ll_free ds_ll_free
-#define StringBuilder DsStringBuilder
+#define String DsString
 #define read_entire_file ds_read_entire_file
 #define write_entire_file ds_write_entire_file
 #define StringIterator DsStringIterator

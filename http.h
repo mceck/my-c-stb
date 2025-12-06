@@ -46,7 +46,7 @@ ds_da_declare(HttpHeaders, const char *);
 
 typedef struct {
     long status_code;
-    DsStringBuilder body;
+    DsString body;
 } HttpResponse;
 
 typedef struct {
@@ -68,7 +68,7 @@ CURLcode http_request(const char *url, HttpMethod method, HttpHeaders *headers, 
 #define http_put(url, headers, body, response) http_request(url, HTTP_PUT, headers, body, response)
 #define http_patch(url, headers, body, response) http_request(url, HTTP_PATCH, headers, body, response)
 #define http_delete(url, headers, response) http_request(url, HTTP_DELETE, headers, NULL, response)
-#define http_reset_response(resp) (resp)->body.count = 0
+#define http_reset_response(resp) (resp)->body.length = 0
 
 static inline CURLcode http_set_method(CURL *curl, HttpMethod method) {
     switch (method) {
@@ -91,8 +91,8 @@ static inline CURLcode http_set_method(CURL *curl, HttpMethod method) {
 }
 
 static inline CURLcode http_set_headers(CURL *curl, HttpHeaders *headers, struct curl_slist **header_list) {
-    for (size_t i = 0; i < headers->count; i++) {
-        *header_list = curl_slist_append(*header_list, headers->items[i]);
+    for (size_t i = 0; i < headers->length; i++) {
+        *header_list = curl_slist_append(*header_list, headers->data[i]);
     }
     CURLcode res = curl_easy_setopt(curl, CURLOPT_HTTPHEADER, *header_list);
     return res;
@@ -100,7 +100,7 @@ static inline CURLcode http_set_headers(CURL *curl, HttpHeaders *headers, struct
 
 static size_t write_callback(void *contents, size_t size, size_t nmemb, void *userp) {
     size_t total = size * nmemb;
-    DsStringBuilder *sb = (DsStringBuilder *)userp;
+    DsString *sb = (DsString *)userp;
     ds_da_append_many(sb, (char *)contents, total);
     ds_sb_append(sb);
     return total;

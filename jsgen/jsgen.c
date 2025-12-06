@@ -95,12 +95,12 @@ const char *get_jsb_type(const char *type) {
 }
 
 void post_process_model(Model *model) {
-    for (size_t i = 0; i < model->fields.count; ++i) {
-        Field *field = &model->fields.items[i];
+    for (size_t i = 0; i < model->fields.length; ++i) {
+        Field *field = &model->fields.data[i];
         if (field->has_counter) {
-            for (size_t j = 0; j < model->fields.count; ++j) {
-                if (strcmp(model->fields.items[j].name, field->counter_field) == 0) {
-                    model->fields.items[j].is_counter_field = true;
+            for (size_t j = 0; j < model->fields.length; ++j) {
+                if (strcmp(model->fields.data[j].name, field->counter_field) == 0) {
+                    model->fields.data[j].is_counter_field = true;
                     break;
                 }
             }
@@ -127,7 +127,7 @@ int parse_field_annotation(Parser *p) {
         return 1;
     }
     if (strcmp(p->lex->string, "jsgen_ignore") == 0) {
-        if (p->current_model->fields.count > 0) p->current_model->fields.count--;
+        if (p->current_model->fields.length > 0) p->current_model->fields.length--;
         return 1;
     }
     if (strcmp(p->lex->string, "jsgen_json_literal") == 0 || strcmp(p->lex->string, "json_literal") == 0) {
@@ -217,7 +217,7 @@ void handle_semicolon(Parser *p) {
 }
 
 int parse_file(const char *filename, Models *models) {
-    StringBuilder f = {0};
+    String f = {0};
     if (!read_entire_file(filename, &f)) return -1;
 
     stb_lexer lex = {0};
@@ -225,7 +225,7 @@ int parse_file(const char *filename, Models *models) {
     Model m = {0};
     Parser p = {.lex = &lex, .models = models, .current_model = &m};
 
-    stb_c_lexer_init(&lex, f.items, f.items + f.count, buffer, sizeof(buffer));
+    stb_c_lexer_init(&lex, f.data, f.data + f.length, buffer, sizeof(buffer));
     while (stb_c_lexer_get_token(&lex)) {
         if (!p.can_generate && lex.token != CLEX_id) continue;
 
@@ -252,7 +252,7 @@ int parse_file(const char *filename, Models *models) {
     return 0;
 }
 
-void gen_parse_field_body(StringBuilder *sb, Field *field, int indent) {
+void gen_parse_field_body(String *sb, Field *field, int indent) {
     const char *jsp_type = get_jsp_type(field->type);
 
     if (jsp_type) {
@@ -333,7 +333,7 @@ void gen_parse_field_body(StringBuilder *sb, Field *field, int indent) {
     }
 }
 
-void gen_stringify_field(StringBuilder *sb, Field *field, int indent) {
+void gen_stringify_field(String *sb, Field *field, int indent) {
     if (field->is_counter_field) return;
     if (field->is_pointer) {
         sb_cat_line(sb, indent, "if (in->", field->name, " != NULL) {");
@@ -347,10 +347,10 @@ void gen_stringify_field(StringBuilder *sb, Field *field, int indent) {
         if (field->is_json_literal) {
             sb_cat_line(sb, indent, "size_t plen = in->", field->name, " ? strlen(in->", field->name, ") : 0;");
             sb_cat_line(sb, indent, "if (plen > 0) {");
-            sb_cat_line(sb, indent + 1, "jsb_srealloc(&jsb->buffer, jsb->buffer.count + plen + 1);");
-            sb_cat_line(sb, indent + 1, "memcpy(jsb->buffer.items + jsb->buffer.count, in->", field->name, ", plen);");
-            sb_cat_line(sb, indent + 1, "jsb->buffer.count += plen;");
-            sb_cat_line(sb, indent + 1, "jsb->buffer.items[jsb->buffer.count] = '\\0';");
+            sb_cat_line(sb, indent + 1, "jsb_srealloc(&jsb->buffer, jsb->buffer.length + plen + 1);");
+            sb_cat_line(sb, indent + 1, "memcpy(jsb->buffer.data + jsb->buffer.length, in->", field->name, ", plen);");
+            sb_cat_line(sb, indent + 1, "jsb->buffer.length += plen;");
+            sb_cat_line(sb, indent + 1, "jsb->buffer.data[jsb->buffer.length] = '\\0';");
             sb_cat_line(sb, indent + 1, "jsb->is_first = false;");
             sb_cat_line(sb, indent + 1, "jsb->is_key = false;");
             sb_cat_line(sb, indent, "} else jsb_null(jsb);");
@@ -380,7 +380,7 @@ void gen_stringify_field(StringBuilder *sb, Field *field, int indent) {
     }
 }
 
-void generate_model_code(StringBuilder *sb, Model *model) {
+void generate_model_code(String *sb, Model *model) {
     int indent = 0;
     if (model->parse) {
 
@@ -394,8 +394,8 @@ void generate_model_code(StringBuilder *sb, Model *model) {
 
         for (int i = 0; i < indent * 4; ++i)
             sb_append(sb, " ");
-        for (size_t i = 0; i < model->fields.count; ++i) {
-            Field *field = &model->fields.items[i];
+        for (size_t i = 0; i < model->fields.length; ++i) {
+            Field *field = &model->fields.data[i];
             if (field->is_counter_field) continue;
             if (i > 0) sb_append(sb, "} else ");
             sb_append(sb, "if (strcmp(jsp->string, \"", js_getalias(field), "\") == 0) {\n");
@@ -403,7 +403,7 @@ void generate_model_code(StringBuilder *sb, Model *model) {
             for (int j = 0; j < indent * 4; ++j)
                 sb_append(sb, " ");
         }
-        if (model->fields.count > 0)
+        if (model->fields.length > 0)
             sb_append(sb, "} else {\n");
         else
             sb_append(sb, "{\n");
@@ -467,8 +467,8 @@ void generate_model_code(StringBuilder *sb, Model *model) {
         sb_cat_line(sb, indent, "if (jsb_begin_object(jsb)) return -1;");
         sb_cat_line(sb, indent, "{");
         indent++;
-        for (size_t i = 0; i < model->fields.count; ++i) {
-            gen_stringify_field(sb, &model->fields.items[i], indent);
+        for (size_t i = 0; i < model->fields.length; ++i) {
+            gen_stringify_field(sb, &model->fields.data[i], indent);
         }
         indent--;
         sb_cat_line(sb, indent, "}");
@@ -510,7 +510,7 @@ void generate_model_code(StringBuilder *sb, Model *model) {
 }
 
 int generate_all_code(const char *out_filename, Models *models) {
-    StringBuilder sb = {0};
+    String sb = {0};
     sb_append(&sb, "#include \"jsb.h\"\n#include \"jsp.h\"\n\n");
     da_foreach(models, model) {
         generate_model_code(&sb, model);
