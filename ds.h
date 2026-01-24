@@ -76,7 +76,7 @@ static const char *DsLogLevelStrings[] = {
 #define DS_UNUSED(x) (void)(x)
 
 #ifndef DS_DA_INIT_CAPACITY
-#define DS_DA_INIT_CAPACITY 1024
+#define DS_DA_INIT_CAPACITY 64
 #endif // DS_DA_INIT_CAPACITY
 
 /**
@@ -111,7 +111,7 @@ typedef struct {
                 (da)->capacity = DS_DA_INIT_CAPACITY;                                  \
             }                                                                          \
             while ((size_t)(expected_capacity) > (da)->capacity) {                     \
-                (da)->capacity = (da)->capacity + ((da)->capacity >> 1);               \
+                (da)->capacity *= 2;                                                   \
             }                                                                          \
             (da)->data = DS_REALLOC((da)->data, (da)->capacity * sizeof(*(da)->data)); \
             assert((da)->data != NULL);                                                \
@@ -278,211 +278,97 @@ typedef struct {
     })
 
 /**
- * Dynamic string builder.
+ * Dynamic string.
  */
 ds_da_declare(DsString, char);
 
-void _ds_sb_append(DsString *sb, ...) {
-    va_list args;
-    va_start(args, sb);
-    const char *str;
-    while ((str = va_arg(args, const char *))) {
-        size_t len = strlen(str);
-        ds_da_reserve(sb, sb->length + len + 1);
-        memcpy(sb->data + sb->length, str, len);
-        sb->length += len;
-    }
-    va_end(args);
-    ds_da_reserve(sb, sb->length + 1);
-    sb->data[sb->length] = '\0';
-}
+void _ds_str_append(DsString *str, ...);
 
 /**
  * Append formatted string to a dynamic string builder.
  * Example:
- *   `ds_sb_appendf(&sb, "Hello, %s!", "World");`
+ *   `ds_str_appendf(&str, "Hello, %s!", "World");`
  */
-void ds_sb_appendf(DsString *sb, const char *fmt, ...) {
-    va_list args;
-    va_start(args, fmt);
-    int n = vsnprintf(NULL, 0, fmt, args);
-    va_end(args);
-    if (n > 0) {
-        ds_da_reserve(sb, sb->length + n + 1);
-        va_start(args, fmt);
-        vsnprintf(sb->data + sb->length, n + 1, fmt, args);
-        va_end(args);
-        sb->length += n;
-    }
-}
+void ds_str_appendf(DsString *str, const char *fmt, ...);
 
 /**
  * Prepend formatted string to a dynamic string builder.
  * Example:
- *   `ds_sb_prependf(&sb, "Hello, %s!", "World");`
+ *   `ds_str_prependf(&str, "Hello, %s!", "World");`
  */
-void ds_sb_prependf(DsString *sb, const char *fmt, ...) {
-    va_list args;
-    va_start(args, fmt);
-    int n = vsnprintf(NULL, 0, fmt, args);
-    va_end(args);
-    if (n > 0) {
-        ds_da_reserve(sb, sb->length + n + 1);
-        char c0 = sb->data[0];
-        memmove(sb->data + n, sb->data, sb->length);
-        va_start(args, fmt);
-        vsnprintf(sb->data, n + 1, fmt, args);
-        sb->data[n] = c0;
-        va_end(args);
-        sb->length += n;
-    }
-}
+void ds_str_prependf(DsString *str, const char *fmt, ...);
 
 /**
  * Append strings to a dynamic string builder.
  * Example:
- *   `ds_sb_append(&sb, "Hello, ", "World", ...);`
+ *   `ds_str_append(&str, "Hello, ", "World", ...);`
  */
-#define ds_sb_append(sb, ...) _ds_sb_append(sb __VA_OPT__(, ) __VA_ARGS__, NULL)
+#define ds_str_append(str, ...) _ds_str_append((str) __VA_OPT__(, ) __VA_ARGS__, NULL)
 
 /**
  * Insert a string at a specific index in the string builder.
  */
-void ds_sb_insert(DsString *sb, const char *str, size_t index) {
-    if (!sb || !str || index > sb->length) return;
-    size_t len = strlen(str);
-    ds_da_reserve(sb, sb->length + len + 1);
-    memmove(sb->data + index + len, sb->data + index, sb->length - index);
-    memcpy(sb->data + index, str, len);
-    sb->length += len;
-}
+void ds_str_insert(DsString *dstr, const char *str, size_t index);
 
 /**
  * Prepend a string to the string builder.
  */
-#define ds_sb_prepend(sb, str) ds_sb_insert((sb), (str), 0)
+#define ds_str_prepend(dstr, str) ds_str_insert((dstr), (str), 0)
 
 /**
  * Check if a substring is included in the string builder.
  */
-bool ds_sb_include(const DsString *sb, const char *substr) {
-    if (!sb || !substr || sb->length == 0 || strlen(substr) == 0) return false;
-    return strstr(sb->data, substr) != NULL;
-}
+bool ds_str_include(const DsString *str, const char *substr);
 
 /**
  * Trim leading whitespace from the string builder.
  */
-DsString *ds_sb_ltrim(DsString *sb) {
-    if (sb && sb->length > 0) {
-        size_t i = 0;
-        while (i < sb->length && (sb->data[i] == ' ' || sb->data[i] == '\t' || sb->data[i] == '\n' || sb->data[i] == '\r')) {
-            i++;
-        }
-        if (i > 0) {
-            memmove(sb->data, sb->data + i, sb->length - i + 1);
-            sb->length -= i;
-        }
-    }
-    return sb;
-}
+DsString *ds_str_ltrim(DsString *str);
 
 /**
  * Trim trailing whitespace from the string builder.
  */
-DsString *ds_sb_rtrim(DsString *sb) {
-    if (sb && sb->length > 0) {
-        size_t i = sb->length;
-        while (i > 0 && (sb->data[i - 1] == ' ' || sb->data[i - 1] == '\t' || sb->data[i - 1] == '\n' || sb->data[i - 1] == '\r')) {
-            i--;
-        }
-        if (i < sb->length) {
-            sb->data[i] = '\0';
-            sb->length = i;
-        }
-    }
-    return sb;
-}
+DsString *ds_str_rtrim(DsString *str);
 
 /**
  * Trim whitespace from the string builder.
  */
-inline DsString *ds_sb_trim(DsString *sb) {
-    return ds_sb_rtrim(ds_sb_ltrim(sb));
-}
+#define ds_str_trim(str) (ds_str_rtrim(ds_str_ltrim(str)))
 
 #ifndef DS_HM_LOAD_FACTOR
 #define DS_HM_LOAD_FACTOR 0.75f
 #endif
 
-size_t _ds_hash_pointer(const void *key) {
-    return (size_t)key;
-}
+size_t _ds_hash_pointer(const void *key);
 
-size_t _ds_hash_int(int key) {
-    uint32_t k = (uint32_t)key;
-    k = (k ^ 61) ^ (k >> 16);
-    k = k + (k << 3);
-    k = k ^ (k >> 4);
-    k = k * 0x27d4eb2d;
-    k = k ^ (k >> 15);
-    return (size_t)k;
-}
-size_t _ds_hash_long(long key) {
-    uint64_t k = (uint64_t)key;
-    k = (~k) + (k << 21);
-    k = k ^ (k >> 24);
-    k = (k + (k << 3)) + (k << 8);
-    k = k ^ (k >> 14);
-    k = (k + (k << 2)) + (k << 4);
-    k = k ^ (k >> 28);
-    k = k + (k << 31);
-    return (size_t)k;
-}
+size_t _ds_hash_int(int key);
 
-size_t _ds_hash_float(double key) {
-    union {
-        double f;
-        uint64_t u;
-    } tmp;
-    tmp.f = key;
-    return _ds_hash_long(tmp.u);
-}
+size_t _ds_hash_long(long key);
 
-size_t _ds_hash_string(const char *key) {
-    if (!key) return 0;
-    size_t hash = 5381;
-    int c;
-    while ((c = *key++)) {
-        hash = ((hash << 5) + hash) + c;
-    }
-    return hash;
-}
+size_t _ds_hash_float(double key);
 
-int _ds_eq_int(int a, int b) {
-    return a == b;
-}
+size_t _ds_hash_string(const char *key);
 
-int _ds_eq_long(long a, long b) {
-    return a == b;
-}
+int _ds_eq_int(int a, int b);
 
-int _ds_eq_float(double a, double b) {
-    return a == b;
-}
+int _ds_eq_long(long a, long b);
 
-int _ds_eq_str(const char *a, const char *b) {
-    return strcmp(a, b) == 0;
-}
+int _ds_eq_float(double a, double b);
 
-int _ds_eq_ptr(const void *a, const void *b) {
-    return a == b;
-}
+int _ds_eq_str(const char *a, const char *b);
+
+int _ds_eq_ptr(const void *a, const void *b);
 
 #define _ds_eq_fn(a, b) _Generic((a), \
     char *: _ds_eq_str,               \
     const char *: _ds_eq_str,         \
     int: _ds_eq_int,                  \
+    char: _ds_eq_int,                 \
+    uint8_t: _ds_eq_int,              \
+    uint16_t: _ds_eq_int,             \
+    uint32_t: _ds_eq_int,             \
+    uint64_t: _ds_eq_long,            \
+    size_t: _ds_eq_long,              \
     long: _ds_eq_long,                \
     float: _ds_eq_float,              \
     double: _ds_eq_float,             \
@@ -492,6 +378,12 @@ int _ds_eq_ptr(const void *a, const void *b) {
     char *: _ds_hash_string,             \
     const char *: _ds_hash_string,       \
     int: _ds_hash_int,                   \
+    char: _ds_hash_int,                  \
+    uint8_t: _ds_hash_int,               \
+    uint16_t: _ds_hash_int,              \
+    uint32_t: _ds_hash_int,              \
+    uint64_t: _ds_hash_long,             \
+    size_t: _ds_hash_long,               \
     long: _ds_hash_long,                 \
     float: _ds_hash_float,               \
     double: _ds_hash_float,              \
@@ -803,74 +695,31 @@ typedef struct {
  * Read the entire contents of a file into a string builder.
  * Example:
 ```c
-DsString sb = {0};
-ds_read_entire_file("path/to/file.txt", &sb);
+DsString str = {0};
+ds_read_entire_file("path/to/file.txt", &str);
 ```
  */
-bool ds_read_entire_file(const char *path, DsString *sb) {
-    bool result = false;
-
-    FILE *f = fopen(path, "rb");
-    if (f == NULL) goto cleanup;
-    if (fseek(f, 0, SEEK_END) < 0) goto cleanup;
-    long s = ftell(f);
-    if (s < 0) goto cleanup;
-    if (fseek(f, 0, SEEK_SET) < 0) goto cleanup;
-
-    size_t size = sb->length + s;
-    ds_da_reserve(sb, size);
-    fread(sb->data + sb->length, s, 1, f);
-    if (ferror(f)) goto cleanup;
-    sb->length = size;
-    result = true;
-cleanup:
-    if (!result)
-        ds_log(DS_ERROR, "Could not read file %s: %s", path, strerror(errno));
-    if (f)
-        fclose(f);
-    return result;
-}
+bool ds_read_entire_file(const char *path, DsString *str);
 
 /**
  * Write the entire contents of a string builder to a file.
  * Example:
 ```c
-DsString sb = {0};
-ds_read_entire_file("path/to/file.txt", &sb);
-ds_write_entire_file("path/to/output.txt", &sb);
+DsString str = {0};
+ds_read_entire_file("path/to/file.txt", &str);
+ds_write_entire_file("path/to/output.txt", &str);
 ```
  */
-bool ds_write_entire_file(const char *path, const DsString *sb) {
-    bool result = false;
-    FILE *f = fopen(path, "wb");
-    if (f == NULL) goto cleanup;
-
-    const char *buf = sb->data;
-    size_t size = sb->length;
-    while (size > 0) {
-        size_t n = fwrite(buf, 1, size, f);
-        if (ferror(f)) goto cleanup;
-        size -= n;
-        buf += n;
-    }
-    result = true;
-cleanup:
-    if (!result) ds_log(DS_ERROR, "Could not write file %s: %s\n", path, strerror(errno));
-    if (f) fclose(f);
-    return result;
-}
+bool ds_write_entire_file(const char *path, const DsString *str);
 
 typedef struct {
     const char *data;
     size_t length;
 } DsStringIterator;
 
-DsStringIterator ds_sb_iter(const DsString *sb) {
-    return (DsStringIterator){.data = sb->data, .length = sb->length};
-}
-DsStringIterator ds_cstr_iter(const char *data) {
-    return (DsStringIterator){.data = data, .length = strlen(data)};
-}
+#define ds_str_iter(str) (DsStringIterator){.data = (str)->data, .length = (str)->length}
+
+#define ds_cstr_iter(str) (DsStringIterator){.data = (str), .length = strlen(str)}
 
 /**
  * Move a string iterator by a delimiter.
@@ -888,6 +737,213 @@ DsStringIterator ds_cstr_iter(const char *data) {
  }
 ```
  */
+DsStringIterator ds_str_split(DsStringIterator *it, char sep);
+
+/**
+ * Create a directory and all parent directories if they don't exist.
+ * Example:
+ * `ds_mkdir_p("path/to/directory");`
+ */
+bool ds_mkdir_p(const char *path);
+#endif // DS_H_
+
+#ifdef DS_IMPLEMENTATION
+void _ds_str_append(DsString *str, ...) {
+    va_list args;
+    va_start(args, str);
+    const char *cstr;
+    while ((cstr = va_arg(args, const char *))) {
+        size_t len = strlen(cstr);
+        ds_da_reserve(str, str->length + len + 1);
+        memcpy(str->data + str->length, cstr, len);
+        str->length += len;
+    }
+    va_end(args);
+    ds_da_reserve(str, str->length + 1);
+    str->data[str->length] = '\0';
+}
+
+void ds_str_appendf(DsString *str, const char *fmt, ...) {
+    va_list args;
+    va_start(args, fmt);
+    int n = vsnprintf(NULL, 0, fmt, args);
+    va_end(args);
+    if (n > 0) {
+        ds_da_reserve(str, str->length + n + 1);
+        va_start(args, fmt);
+        vsnprintf(str->data + str->length, n + 1, fmt, args);
+        va_end(args);
+        str->length += n;
+    }
+}
+
+void ds_str_prependf(DsString *str, const char *fmt, ...) {
+    va_list args;
+    va_start(args, fmt);
+    int n = vsnprintf(NULL, 0, fmt, args);
+    va_end(args);
+    if (n > 0) {
+        ds_da_reserve(str, str->length + n + 1);
+        char c0 = str->data[0];
+        memmove(str->data + n, str->data, str->length);
+        va_start(args, fmt);
+        vsnprintf(str->data, n + 1, fmt, args);
+        str->data[n] = c0;
+        va_end(args);
+        str->length += n;
+    }
+}
+
+void ds_str_insert(DsString *dstr, const char *str, size_t index) {
+    if (!dstr || !str || index > dstr->length) return;
+    size_t len = strlen(str);
+    ds_da_reserve(dstr, dstr->length + len + 1);
+    memmove(dstr->data + index + len, dstr->data + index, dstr->length - index);
+    memcpy(dstr->data + index, str, len);
+    dstr->length += len;
+}
+
+bool ds_str_include(const DsString *str, const char *substr) {
+    if (!str || !substr || str->length == 0 || strlen(substr) == 0) return false;
+    return strstr(str->data, substr) != NULL;
+}
+
+DsString *ds_str_ltrim(DsString *str) {
+    if (str && str->length > 0) {
+        size_t i = 0;
+        while (i < str->length && (str->data[i] == ' ' || str->data[i] == '\t' || str->data[i] == '\n' || str->data[i] == '\r')) {
+            i++;
+        }
+        if (i > 0) {
+            memmove(str->data, str->data + i, str->length - i + 1);
+            str->length -= i;
+        }
+    }
+    return str;
+}
+
+DsString *ds_str_rtrim(DsString *str) {
+    if (str && str->length > 0) {
+        size_t i = str->length;
+        while (i > 0 && (str->data[i - 1] == ' ' || str->data[i - 1] == '\t' || str->data[i - 1] == '\n' || str->data[i - 1] == '\r')) {
+            i--;
+        }
+        if (i < str->length) {
+            str->data[i] = '\0';
+            str->length = i;
+        }
+    }
+    return str;
+}
+
+size_t _ds_hash_pointer(const void *key) {
+    return (size_t)key;
+}
+
+size_t _ds_hash_int(int key) {
+    uint32_t k = (uint32_t)key;
+    k = (k ^ 61) ^ (k >> 16);
+    k = k + (k << 3);
+    k = k ^ (k >> 4);
+    k = k * 0x27d4eb2d;
+    k = k ^ (k >> 15);
+    return (size_t)k;
+}
+size_t _ds_hash_long(long key) {
+    uint64_t k = (uint64_t)key;
+    k = (~k) + (k << 21);
+    k = k ^ (k >> 24);
+    k = (k + (k << 3)) + (k << 8);
+    k = k ^ (k >> 14);
+    k = (k + (k << 2)) + (k << 4);
+    k = k ^ (k >> 28);
+    k = k + (k << 31);
+    return (size_t)k;
+}
+
+size_t _ds_hash_float(double key) {
+    union {
+        double f;
+        uint64_t u;
+    } tmp;
+    tmp.f = key;
+    return _ds_hash_long(tmp.u);
+}
+
+size_t _ds_hash_string(const char *key) {
+    if (!key) return 0;
+    size_t hash = 5381;
+    int c;
+    while ((c = *key++)) {
+        hash = ((hash << 5) + hash) + c;
+    }
+    return hash;
+}
+
+int _ds_eq_int(int a, int b) {
+    return a == b;
+}
+
+int _ds_eq_long(long a, long b) {
+    return a == b;
+}
+
+int _ds_eq_float(double a, double b) {
+    return a == b;
+}
+
+int _ds_eq_str(const char *a, const char *b) {
+    return strcmp(a, b) == 0;
+}
+
+int _ds_eq_ptr(const void *a, const void *b) {
+    return a == b;
+}
+
+bool ds_read_entire_file(const char *path, DsString *str) {
+    bool result = false;
+
+    FILE *f = fopen(path, "rb");
+    if (f == NULL) goto cleanup;
+    if (fseek(f, 0, SEEK_END) < 0) goto cleanup;
+    long s = ftell(f);
+    if (s < 0) goto cleanup;
+    if (fseek(f, 0, SEEK_SET) < 0) goto cleanup;
+
+    size_t size = str->length + s;
+    ds_da_reserve(str, size);
+    fread(str->data + str->length, s, 1, f);
+    if (ferror(f)) goto cleanup;
+    str->length = size;
+    result = true;
+cleanup:
+    if (!result)
+        ds_log(DS_ERROR, "Could not read file %s: %s", path, strerror(errno));
+    if (f)
+        fclose(f);
+    return result;
+}
+
+bool ds_write_entire_file(const char *path, const DsString *str) {
+    bool result = false;
+    FILE *f = fopen(path, "wb");
+    if (f == NULL) goto cleanup;
+
+    const char *buf = str->data;
+    size_t size = str->length;
+    while (size > 0) {
+        size_t n = fwrite(buf, 1, size, f);
+        if (ferror(f)) goto cleanup;
+        size -= n;
+        buf += n;
+    }
+    result = true;
+cleanup:
+    if (!result) ds_log(DS_ERROR, "Could not write file %s: %s\n", path, strerror(errno));
+    if (f) fclose(f);
+    return result;
+}
+
 DsStringIterator ds_str_split(DsStringIterator *it, char sep) {
     DsStringIterator part = {0};
     if (it->length == 0) return part;
@@ -906,11 +962,6 @@ DsStringIterator ds_str_split(DsStringIterator *it, char sep) {
     return part;
 }
 
-/**
- * Create a directory and all parent directories if they don't exist.
- * Example:
- * `ds_mkdir_p("path/to/directory");`
- */
 bool ds_mkdir_p(const char *path) {
     DsStringIterator iter = ds_cstr_iter(path);
     DsString tmp_path = {0};
@@ -921,7 +972,7 @@ bool ds_mkdir_p(const char *path) {
         if (part.length == 0) continue;
         if (part.length == 1 && part.data[0] == '.') continue;
         ds_da_append_many(&tmp_path, part.data, part.length);
-        ds_sb_append(&tmp_path, "/");
+        ds_str_append(&tmp_path, "/");
         if (mkdir(tmp_path.data, 0755) < 0) {
             if (errno != EEXIST) {
                 ds_log(DS_ERROR, "Could not create directory `%s`: %s", tmp_path.data,
@@ -934,13 +985,13 @@ bool ds_mkdir_p(const char *path) {
     ds_da_free(&tmp_path);
     return true;
 }
+#endif // DS_IMPLEMENTATION
 
 #ifdef DS_NO_PREFIX
 // Strip prefixes
 #define UNREACHABLE DS_UNREACHABLE
 #define TODO DS_TODO
 #define UNUSED DS_UNUSED
-#define log ds_log
 #define log_info ds_log_info
 #define log_debug ds_log_debug
 #define log_warn ds_log_warn
@@ -964,15 +1015,15 @@ bool ds_mkdir_p(const char *path) {
 #define da_foreach ds_da_foreach
 #define da_find ds_da_find
 #define da_index_of ds_da_index_of
-#define sb_append ds_sb_append
-#define sb_appendf ds_sb_appendf
-#define sb_prependf ds_sb_prependf
-#define sb_insert ds_sb_insert
-#define sb_prepend ds_sb_prepend
-#define sb_include ds_sb_include
-#define sb_ltrim ds_sb_ltrim
-#define sb_rtrim ds_sb_rtrim
-#define sb_trim ds_sb_trim
+#define str_append ds_str_append
+#define str_appendf ds_str_appendf
+#define str_prependf ds_str_prependf
+#define str_insert ds_str_insert
+#define str_prepend ds_str_prepend
+#define str_include ds_str_include
+#define str_ltrim ds_str_ltrim
+#define str_rtrim ds_str_rtrim
+#define str_trim ds_str_trim
 #define hm_declare ds_hm_declare
 #define hm_get ds_hm_get
 #define hm_try ds_hm_try
@@ -990,9 +1041,8 @@ bool ds_mkdir_p(const char *path) {
 #define write_entire_file ds_write_entire_file
 #define StringIterator DsStringIterator
 #define str_split ds_str_split
-#define sb_iter ds_sb_iter
+#define str_iter ds_str_iter
 #define cstr_iter ds_cstr_iter
 #define mkdir_p ds_mkdir_p
 #endif
 
-#endif // DS_H_

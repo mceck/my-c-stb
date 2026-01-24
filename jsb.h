@@ -166,6 +166,7 @@ int jsb_date_fmt(Jsb *jsb, time_t timestamp, const char *fmt);
 int jsb_null(Jsb *jsb);
 
 #define jsb_get(jsb) (jsb)->buffer.items
+#endif // JSB_H_
 
 #ifdef JSB_IMPLEMENTATION
 
@@ -395,4 +396,3 @@ int jsb_date_fmt(Jsb *jsb, time_t timestamp, const char *fmt) {
     return 0;
 }
 #endif // JSB_IMPLEMENTATION
-#endif // JSB_H_

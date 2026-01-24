@@ -10,14 +10,17 @@
 ```c
     HttpResponse response = {0};
     // GET url
-    http(url, &response);
+    response = http(url);
+    http_free_response(&response);
     // GET url with headers
     HttpHeaders headers = {0};
     ds_da_append(&headers, "Content-Type: application/json");
-    http(url, &response, .headers = &headers);
+    response = http(url, .headers = &headers);
+    http_free_response(&response);
     ds_da_free(&headers);
     // POST url with data
-    http(url, &response, .method = HTTP_POST, .body="data");
+    response = http(url, .method = HTTP_POST, .body="data");
+    http_free_response(&response);
 ```
  */
 
@@ -28,8 +31,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdbool.h>
-#include <stdarg.h>
-#include <assert.h>
 #include "ds.h"
 
 typedef enum {
@@ -47,6 +48,7 @@ ds_da_declare(HttpHeaders, const char *);
 typedef struct {
     long status_code;
     DsString body;
+    CURLcode curl_code;
 } HttpResponse;
 
 typedef struct {
@@ -59,18 +61,31 @@ typedef struct {
 #define http_init() curl_global_init(CURL_GLOBAL_DEFAULT)
 #define http_cleanup() curl_global_cleanup()
 
-CURLcode http_request(const char *url, HttpMethod method, HttpHeaders *headers, const char *body, HttpResponse *response);
+static CURLcode http_set_method(CURL *curl, const HttpMethod method);
 
-#define http(url, response, ...) \
-    http_request_opts(url, response, (HttpRequestOpts){__VA_ARGS__})
-#define http_get(url, headers, response) http_request(url, HTTP_GET, headers, NULL, response)
-#define http_post(url, headers, body, response) http_request(url, HTTP_POST, headers, body, response)
-#define http_put(url, headers, body, response) http_request(url, HTTP_PUT, headers, body, response)
-#define http_patch(url, headers, body, response) http_request(url, HTTP_PATCH, headers, body, response)
-#define http_delete(url, headers, response) http_request(url, HTTP_DELETE, headers, NULL, response)
-#define http_reset_response(resp) (resp)->body.length = 0
+static CURLcode http_set_headers(CURL *curl, const HttpHeaders *headers, struct curl_slist **header_list);
 
-static inline CURLcode http_set_method(CURL *curl, HttpMethod method) {
+static size_t write_callback(void *contents, size_t size, size_t nmemb, void *userp);
+
+/**
+ * Sends an HTTP request.
+ * @param url The URL to send the request to.
+ * @param method The HTTP method to use.
+ * @param headers The headers to include in the request, can be NULL.
+ * @param body The body of the request, can be NULL.
+ * @return An HttpResponse struct containing the response data.
+ */
+HttpResponse http_request(const char *url, const HttpMethod method, const HttpHeaders *headers, const char *body);
+
+HttpResponse http_request_opts(const char *url, HttpRequestOpts opts);
+
+#define http(url, ...) \
+    http_request_opts(url, (HttpRequestOpts){__VA_ARGS__})
+
+#endif // HTTP_H_
+
+#ifdef HTTP_IMPLEMENTATION
+static CURLcode http_set_method(CURL *curl, const HttpMethod method) {
     switch (method) {
     case HTTP_GET:
         return curl_easy_setopt(curl, CURLOPT_HTTPGET, 1L);
@@ -90,7 +105,7 @@ static inline CURLcode http_set_method(CURL *curl, HttpMethod method) {
     return CURLE_UNSUPPORTED_PROTOCOL;
 }
 
-static inline CURLcode http_set_headers(CURL *curl, HttpHeaders *headers, struct curl_slist **header_list) {
+static CURLcode http_set_headers(CURL *curl, const HttpHeaders *headers, struct curl_slist **header_list) {
     for (size_t i = 0; i < headers->length; i++) {
         *header_list = curl_slist_append(*header_list, headers->data[i]);
     }
@@ -100,30 +115,21 @@ static inline CURLcode http_set_headers(CURL *curl, HttpHeaders *headers, struct
 
 static size_t write_callback(void *contents, size_t size, size_t nmemb, void *userp) {
     size_t total = size * nmemb;
-    DsString *sb = (DsString *)userp;
-    ds_da_append_many(sb, (char *)contents, total);
-    ds_sb_append(sb);
+    DsString *str = (DsString *)userp;
+    ds_da_append_many(str, (char *)contents, total);
+    ds_str_append(str);
     return total;
 }
 
-static inline CURLcode http_request_opts(const char *url, HttpResponse *response, HttpRequestOpts opts) {
-    return http_request(url, opts.method, opts.headers, opts.body, response);
+HttpResponse http_request_opts(const char *url, HttpRequestOpts opts) {
+    return http_request(url, opts.method, opts.headers, opts.body);
 }
 
-/**
- * Sends an HTTP request.
- * @param url The URL to send the request to.
- * @param method The HTTP method to use.
- * @param headers The headers to include in the request, can be NULL.
- * @param body The body of the request, can be NULL.
- * @param response The response object to populate.
- * @return CURLcode indicating the result of the request.
- */
-CURLcode http_request(const char *url, HttpMethod method, HttpHeaders *headers, const char *body, HttpResponse *response) {
+HttpResponse http_request(const char *url, const HttpMethod method, const HttpHeaders *headers, const char *body) {
     CURL *curl;
     struct curl_slist *header_list = NULL;
     CURLcode res = CURLE_FAILED_INIT;
-
+    HttpResponse response = {0};
     curl = curl_easy_init();
     if (!curl) goto cleanup;
     res = curl_easy_setopt(curl, CURLOPT_URL, url);
@@ -141,15 +147,17 @@ CURLcode http_request(const char *url, HttpMethod method, HttpHeaders *headers, 
 
     res = curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_callback);
     if (res) goto cleanup;
-    res = curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response->body);
+    res = curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response.body);
     if (res) goto cleanup;
 
     res = curl_easy_perform(curl);
-    curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &response->status_code);
+    curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &response.status_code);
 cleanup:
     if (header_list) curl_slist_free_all(header_list);
     if (curl) curl_easy_cleanup(curl);
-    return res;
+    if (res) http_free_response(&response);
+    response.curl_code = res;
+    return response;
 }
 
-#endif // HTTP_H_
+#endif // HTTP_IMPLEMENTATION
