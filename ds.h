@@ -21,8 +21,15 @@
 #include <errno.h>
 #include <stdarg.h>
 #include <assert.h>
+#ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
+#include "windows.h"
+#include <io.h>
+#else
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <dirent.h>
+#endif
 #ifndef DS_ALLOC
 #define DS_ALLOC malloc
 #endif // DS_ALLOC
@@ -34,43 +41,43 @@
 #endif // DS_FREE
 
 typedef enum {
-    DS_DEBUG,
-    DS_INFO,
-    DS_WARN,
-    DS_ERROR
+    DS_LOG_DEBUG,
+    DS_LOG_INFO,
+    DS_LOG_WARN,
+    DS_LOG_ERROR
 } DsLogLevel;
 
 #ifndef DS_LOG_LEVEL
-#define DS_LOG_LEVEL DS_INFO
+#define DS_LOG_LEVEL DS_LOG_INFO
 #endif // DS_LOG_LEVEL
-
-static const char *DsLogLevelStrings[] = {
-    [DS_DEBUG] = "DEBUG",
-    [DS_INFO] = "INFO",
-    [DS_WARN] = "WARN",
-    [DS_ERROR] = "ERROR"};
 
 #define ds_log(LVL, FMT, ...)                                                                  \
     do {                                                                                       \
         if (DS_LOG_LEVEL <= LVL) {                                                             \
-            FILE *log_file = LVL >= DS_ERROR ? stderr : stdout;                                \
-            fprintf(log_file, "[%s] " FMT, DsLogLevelStrings[LVL] __VA_OPT__(, ) __VA_ARGS__); \
+            FILE *log_file = LVL >= DS_LOG_ERROR ? stderr : stdout;                            \
+            switch(LVL){                                                                       \
+                case DS_LOG_DEBUG: fprintf(log_file, "[DEBUG] "); break;                       \
+                case DS_LOG_INFO:  fprintf(log_file, "[INFO] ");  break;                       \
+                case DS_LOG_WARN:  fprintf(log_file, "[WARN] ");  break;                       \
+                case DS_LOG_ERROR: fprintf(log_file, "[ERROR] "); break;                       \
+            }                                                                                  \
+            fprintf(log_file, FMT __VA_OPT__(, ) __VA_ARGS__); \
             fflush(log_file);                                                                  \
         }                                                                                      \
     } while (0)
-#define ds_log_info(FMT, ...) ds_log(DS_INFO, FMT, __VA_ARGS__)
-#define ds_log_debug(FMT, ...) ds_log(DS_DEBUG, FMT, __VA_ARGS__)
-#define ds_log_warn(FMT, ...) ds_log(DS_WARN, FMT, __VA_ARGS__)
-#define ds_log_error(FMT, ...) ds_log(DS_ERROR, FMT, __VA_ARGS__)
+#define ds_log_info(FMT, ...) ds_log(DS_LOG_INFO, FMT, __VA_ARGS__)
+#define ds_log_debug(FMT, ...) ds_log(DS_LOG_DEBUG, FMT, __VA_ARGS__)
+#define ds_log_warn(FMT, ...) ds_log(DS_LOG_WARN, FMT, __VA_ARGS__)
+#define ds_log_error(FMT, ...) ds_log(DS_LOG_ERROR, FMT, __VA_ARGS__)
 
 #define DS_TODO(msg)                                                                     \
     do {                                                                                 \
-        ds_log(DS_WARN, "TODO: %s\nat %s::%s::%d\n", msg, __FILE__, __func__, __LINE__); \
+        ds_log(DS_LOG_WARN, "TODO: %s\nat %s::%s::%d\n", msg, __FILE__, __func__, __LINE__); \
         abort();                                                                         \
     } while (0)
 #define DS_UNREACHABLE()                                                                  \
     do {                                                                                  \
-        ds_log(DS_ERROR, "UNREACHABLE CODE: %s::%s::%d\n", __FILE__, __func__, __LINE__); \
+        ds_log(DS_LOG_ERROR, "UNREACHABLE CODE: %s::%s::%d\n", __FILE__, __func__, __LINE__); \
         abort();                                                                          \
     } while (0)
 #define DS_UNUSED(x) (void)(x)
@@ -745,6 +752,30 @@ DsStringIterator ds_str_split(DsStringIterator *it, char sep);
  * `ds_mkdir_p("path/to/directory");`
  */
 bool ds_mkdir_p(const char *path);
+
+
+/** dirent shims for windows */
+#define DT_FILE 0x8
+#ifdef _WIN32
+#define DT_DIR 0x4
+#define DT_REG DT_FILE
+#define DT_UNKNOWN 0
+
+struct dirent {
+    unsigned char d_type;
+    char d_name[MAX_PATH+1];
+};
+typedef struct {
+    HANDLE hFind;
+    WIN32_FIND_DATA data;
+    struct dirent *dirent;
+} DIR;
+DIR *opendir(const char *dirpath);
+struct dirent *readdir(DIR *dirp);
+int closedir(DIR *dirp);
+
+#endif // _WIN32
+
 #endif // DS_H_
 
 #ifdef DS_IMPLEMENTATION
@@ -918,7 +949,7 @@ bool ds_read_entire_file(const char *path, DsString *str) {
     result = true;
 cleanup:
     if (!result)
-        ds_log(DS_ERROR, "Could not read file %s: %s", path, strerror(errno));
+        ds_log(DS_LOG_ERROR, "Could not read file %s: %s", path, strerror(errno));
     if (f)
         fclose(f);
     return result;
@@ -939,7 +970,7 @@ bool ds_write_entire_file(const char *path, const DsString *str) {
     }
     result = true;
 cleanup:
-    if (!result) ds_log(DS_ERROR, "Could not write file %s: %s\n", path, strerror(errno));
+    if (!result) ds_log(DS_LOG_ERROR, "Could not write file %s: %s\n", path, strerror(errno));
     if (f) fclose(f);
     return result;
 }
@@ -973,9 +1004,14 @@ bool ds_mkdir_p(const char *path) {
         if (part.length == 1 && part.data[0] == '.') continue;
         ds_da_append_many(&tmp_path, part.data, part.length);
         ds_str_append(&tmp_path, "/");
-        if (mkdir(tmp_path.data, 0755) < 0) {
+        #ifdef _WIN32
+        int result = mkdir(tmp_path.data);
+        #else
+        int result = mkdir(tmp_path.data, 0755);
+        #endif
+        if (result < 0) {
             if (errno != EEXIST) {
-                ds_log(DS_ERROR, "Could not create directory `%s`: %s", tmp_path.data,
+                ds_log(DS_LOG_ERROR, "Could not create directory `%s`: %s", tmp_path.data,
                        strerror(errno));
                 ds_da_free(&tmp_path);
                 return false;
@@ -985,6 +1021,62 @@ bool ds_mkdir_p(const char *path) {
     ds_da_free(&tmp_path);
     return true;
 }
+
+#ifdef _WIN32
+DIR *opendir(const char *path)
+{
+    assert(path);
+
+    char buffer[MAX_PATH];
+    snprintf(buffer, MAX_PATH, "%s\\*", path);
+    DIR *dir = (DIR*)DS_ALLOC(sizeof(DIR));
+
+    dir->hFind = FindFirstFile(buffer, &dir->data);
+    if (dir->hFind == INVALID_HANDLE_VALUE) {
+        free(dir);
+        return NULL;
+    }
+
+    return dir;
+}
+
+struct dirent *readdir(DIR *dir)
+{
+    assert(dir);
+
+    if (dir->dirent == NULL) {
+        dir->dirent = DS_ALLOC(sizeof(struct dirent));
+    } else if(!FindNextFile(dir->hFind, &dir->data)) {
+        return NULL;
+    }
+
+    strncpy(
+        dir->dirent->d_name,
+        dir->data.cFileName,
+        sizeof(dir->dirent->d_name) - 1);
+    dir->dirent->d_name[sizeof(dir->dirent->d_name) - 1] = '\0';
+    dir->dirent->d_type = DT_UNKNOWN;
+    if (dir->data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
+        dir->dirent->d_type = DT_DIR;
+    } else if (dir->data.dwFileAttributes & FILE_ATTRIBUTE_ARCHIVE) {
+        dir->dirent->d_type = DT_FILE;
+    }
+
+    return dir->dirent;
+}
+
+int closedir(DIR *dir)
+{
+    assert(dir);
+
+    if(!FindClose(dir->hFind)) return -1;
+
+    free(dir->dirent);
+    free(dir);
+
+    return 0;
+}
+#endif // _WIN32
 #endif // DS_IMPLEMENTATION
 
 #ifdef DS_NO_PREFIX
@@ -996,10 +1088,10 @@ bool ds_mkdir_p(const char *path) {
 #define log_debug ds_log_debug
 #define log_warn ds_log_warn
 #define log_error ds_log_error
-#define DEBUG DS_DEBUG
-#define INFO DS_INFO
-#define WARN DS_WARN
-#define ERROR DS_ERROR
+#define LOG_DEBUG DS_LOG_DEBUG
+#define LOG_INFO DS_LOG_INFO
+#define LOG_WARN DS_LOG_WARN
+#define LOG_ERROR DS_LOG_ERROR
 #define da_declare ds_da_declare
 #define da_reserve ds_da_reserve
 #define da_append ds_da_append
