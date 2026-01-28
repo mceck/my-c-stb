@@ -51,34 +51,42 @@ typedef enum {
 #define DS_LOG_LEVEL DS_LOG_INFO
 #endif // DS_LOG_LEVEL
 
-#define ds_log(LVL, FMT, ...)                                                                  \
-    do {                                                                                       \
-        if (DS_LOG_LEVEL <= LVL) {                                                             \
-            FILE *log_file = LVL >= DS_LOG_ERROR ? stderr : stdout;                            \
-            switch(LVL){                                                                       \
-                case DS_LOG_DEBUG: fprintf(log_file, "[DEBUG] "); break;                       \
-                case DS_LOG_INFO:  fprintf(log_file, "[INFO] ");  break;                       \
-                case DS_LOG_WARN:  fprintf(log_file, "[WARN] ");  break;                       \
-                case DS_LOG_ERROR: fprintf(log_file, "[ERROR] "); break;                       \
-            }                                                                                  \
-            fprintf(log_file, FMT __VA_OPT__(, ) __VA_ARGS__); \
-            fflush(log_file);                                                                  \
-        }                                                                                      \
+#define ds_log(LVL, FMT, ...)                                       \
+    do {                                                            \
+        if (DS_LOG_LEVEL <= LVL) {                                  \
+            FILE *log_file = LVL >= DS_LOG_ERROR ? stderr : stdout; \
+            switch (LVL) {                                          \
+            case DS_LOG_DEBUG:                                      \
+                fprintf(log_file, "[DEBUG] ");                      \
+                break;                                              \
+            case DS_LOG_INFO:                                       \
+                fprintf(log_file, "[INFO] ");                       \
+                break;                                              \
+            case DS_LOG_WARN:                                       \
+                fprintf(log_file, "[WARN] ");                       \
+                break;                                              \
+            case DS_LOG_ERROR:                                      \
+                fprintf(log_file, "[ERROR] ");                      \
+                break;                                              \
+            }                                                       \
+            fprintf(log_file, FMT __VA_OPT__(, ) __VA_ARGS__);      \
+            fflush(log_file);                                       \
+        }                                                           \
     } while (0)
 #define ds_log_info(FMT, ...) ds_log(DS_LOG_INFO, FMT, __VA_ARGS__)
 #define ds_log_debug(FMT, ...) ds_log(DS_LOG_DEBUG, FMT, __VA_ARGS__)
 #define ds_log_warn(FMT, ...) ds_log(DS_LOG_WARN, FMT, __VA_ARGS__)
 #define ds_log_error(FMT, ...) ds_log(DS_LOG_ERROR, FMT, __VA_ARGS__)
 
-#define DS_TODO(msg)                                                                     \
-    do {                                                                                 \
+#define DS_TODO(msg)                                                                         \
+    do {                                                                                     \
         ds_log(DS_LOG_WARN, "TODO: %s\nat %s::%s::%d\n", msg, __FILE__, __func__, __LINE__); \
-        abort();                                                                         \
+        abort();                                                                             \
     } while (0)
-#define DS_UNREACHABLE()                                                                  \
-    do {                                                                                  \
+#define DS_UNREACHABLE()                                                                      \
+    do {                                                                                      \
         ds_log(DS_LOG_ERROR, "UNREACHABLE CODE: %s::%s::%d\n", __FILE__, __func__, __LINE__); \
-        abort();                                                                          \
+        abort();                                                                              \
     } while (0)
 #define DS_UNUSED(x) (void)(x)
 
@@ -242,12 +250,12 @@ typedef struct {
 
 /**
  * Iterate over a dynamic array.
+ * It will define `var` pointer to the current item.
  * Example:
- *   `ds_da_foreach(&a, item) { printf("%d\n", item); }`
+ *   `ds_da_foreach(&a, item) { printf("%d\n", *item); }`
  */
 #define ds_da_foreach(da, var)  \
-    __typeof__((da)->data) var; \
-    for (size_t _i = 0; _i < (da)->length && (var = &(da)->data[_i]); _i++)
+    for (__typeof__((da)->data) var = (da)->data; var < (da)->data + (da)->length; var++)
 
 /**
  * Find an item in a dynamic array. It returns a pointer to the item, or NULL if not found.
@@ -310,7 +318,7 @@ void ds_str_prependf(DsString *str, const char *fmt, ...);
  * Example:
  *   `ds_str_append(&str, "Hello, ", "World", ...);`
  */
-#define ds_str_append(str, ...) _ds_str_append((str) __VA_OPT__(, ) __VA_ARGS__, NULL)
+#define ds_str_append(str, ...) _ds_str_append((str)__VA_OPT__(, ) __VA_ARGS__, NULL)
 
 /**
  * Insert a string at a specific index in the string builder.
@@ -441,7 +449,7 @@ typedef struct {
         name##_Table table;                 \
         size_t (*hfn)(key_t);               \
         int (*eqfn)(key_t, key_t);          \
-        size_t size;                        \
+        size_t length;                      \
     } name
 
 #define _ds_hm_resize(hm)                                                                     \
@@ -472,24 +480,24 @@ ds_hm_declare(my_map, int, const char *);
     ds_hm_set(&hm, 42, "Hello");
 ```
  */
-#define ds_hm_set(hm, key_v, val_v)                                                            \
-    do {                                                                                       \
-        if ((hm)->table.length == 0 || (hm)->size >= (hm)->table.length * DS_HM_LOAD_FACTOR) { \
-            _ds_hm_resize(hm);                                                                 \
-        }                                                                                      \
-        __typeof__(*(hm)->table.data[0].data) kv = {.key = key_v, .value = val_v};             \
-        size_t _hash = _ds_hm_hfn((hm), (kv).key) % (hm)->table.length;                        \
-        size_t _i;                                                                             \
-        for (_i = 0; _i < (hm)->table.data[_hash].length; _i++) {                              \
-            if (_ds_hm_eqfn((hm), (hm)->table.data[_hash].data[_i].key, (kv).key)) {           \
-                (hm)->table.data[_hash].data[_i].value = (kv).value;                           \
-                break;                                                                         \
-            }                                                                                  \
-        }                                                                                      \
-        if (_i == (hm)->table.data[_hash].length) {                                            \
-            ds_da_append(&(hm)->table.data[_hash], kv);                                        \
-            (hm)->size++;                                                                      \
-        }                                                                                      \
+#define ds_hm_set(hm, key_v, val_v)                                                              \
+    do {                                                                                         \
+        if ((hm)->table.length == 0 || (hm)->length >= (hm)->table.length * DS_HM_LOAD_FACTOR) { \
+            _ds_hm_resize(hm);                                                                   \
+        }                                                                                        \
+        __typeof__(*(hm)->table.data[0].data) kv = {.key = (key_v), .value = (val_v)};           \
+        size_t _hash = _ds_hm_hfn((hm), (kv).key) % (hm)->table.length;                          \
+        size_t _i;                                                                               \
+        for (_i = 0; _i < (hm)->table.data[_hash].length; _i++) {                                \
+            if (_ds_hm_eqfn((hm), (hm)->table.data[_hash].data[_i].key, (kv).key)) {             \
+                (hm)->table.data[_hash].data[_i].value = (kv).value;                             \
+                break;                                                                           \
+            }                                                                                    \
+        }                                                                                        \
+        if (_i == (hm)->table.data[_hash].length) {                                              \
+            ds_da_append(&(hm)->table.data[_hash], kv);                                          \
+            (hm)->length++;                                                                      \
+        }                                                                                        \
     } while (0)
 
 /**
@@ -507,7 +515,7 @@ ds_hm_declare(my_map, int, const char *);
     ({                                                                                  \
         __typeof__(&(hm)->table.data[0].data[0].value) _val = NULL;                     \
         if ((hm)->table.length) {                                                       \
-            size_t _hash = _ds_hm_hfn((hm), key_v) % (hm)->table.length;                \
+            size_t _hash = _ds_hm_hfn((hm), (key_v)) % (hm)->table.length;              \
             for (size_t _i = 0; _i < (hm)->table.data[_hash].length; _i++) {            \
                 if (_ds_hm_eqfn((hm), (hm)->table.data[_hash].data[_i].key, (key_v))) { \
                     _val = &(hm)->table.data[_hash].data[_i].value;                     \
@@ -530,7 +538,7 @@ ds_hm_declare(my_map, int, const char *);
 #define ds_hm_get(hm, key_v)                                                        \
     ({                                                                              \
         __typeof__((hm)->table.data[0].data[0].value) _val = {0};                   \
-        size_t _hash = _ds_hm_hfn((hm), key_v) % (hm)->table.length;                \
+        size_t _hash = _ds_hm_hfn((hm), (key_v)) % (hm)->table.length;              \
         for (size_t _i = 0; _i < (hm)->table.data[_hash].length; _i++) {            \
             if (_ds_hm_eqfn((hm), (hm)->table.data[_hash].data[_i].key, (key_v))) { \
                 _val = (hm)->table.data[_hash].data[_i].value;                      \
@@ -547,37 +555,40 @@ ds_hm_declare(my_map, int, const char *);
  const char **value = ds_hm_remove(&hm, 42);
  ```
  */
-#define ds_hm_remove(hm, key_v)                                                   \
-    ({                                                                            \
-        __typeof__(&(hm)->table.data[0].data[0].value) _val = NULL;               \
-        size_t _hash = _ds_hm_hfn((hm), key_v) % (hm)->table.length;              \
-        for (size_t _i = 0; _i < (hm)->table.data[_hash].length; _i++) {          \
-            if (_ds_hm_eqfn((hm), (hm)->table.data[_hash].data[_i].key, key_v)) { \
-                _val = &(hm)->table.data[_hash].data[_i].value;                   \
-                ds_da_remove(&(hm)->table.data[_hash], _i, 1);                    \
-                (hm)->size--;                                                     \
-            }                                                                     \
-        }                                                                         \
-        _val;                                                                     \
+#define ds_hm_remove(hm, key_v)                                                     \
+    ({                                                                              \
+        __typeof__(&(hm)->table.data[0].data[0].value) _val = NULL;                 \
+        size_t _hash = _ds_hm_hfn((hm), (key_v)) % (hm)->table.length;              \
+        for (size_t _i = 0; _i < (hm)->table.data[_hash].length; _i++) {            \
+            if (_ds_hm_eqfn((hm), (hm)->table.data[_hash].data[_i].key, (key_v))) { \
+                _val = &(hm)->table.data[_hash].data[_i].value;                     \
+                ds_da_remove(&(hm)->table.data[_hash], _i, 1);                      \
+                (hm)->length--;                                                     \
+            }                                                                       \
+        }                                                                           \
+        _val;                                                                       \
     })
 
 /**
  * Loop over all key-value pairs in the hash map.
- * It will define `key` and `value` as pointers to the current key-value pair.
+ * It will define `key` and `value` variables containing the current key and value.
+ * It also defines internal loop variables `_i` and `_j`, wrap in a block to avoid name clashes.
  * Example:
 ```c
-ds_hm_foreach(&hm, key, value) {
-    printf("Key: %d, Value: %s\n", *key, *value);
+{
+    ds_hm_foreach(&hm, key, value) {
+        printf("Key: %d, Value: %s\n", key, value);
+    }
 }
 ```
  */
-#define ds_hm_foreach(hm, key_var, val_var)                                       \
-    __typeof__(&(hm)->table.data[0].data[0].key) key_var;                         \
-    __typeof__(&(hm)->table.data[0].data[0].value) val_var;                       \
-    for (size_t _i = 0; _i < (hm)->table.length; _i++)                            \
-        for (size_t _j = 0; _j < (hm)->table.data[_i].length &&                   \
-                            ((key_var) = &(hm)->table.data[_i].data[_j].key,      \
-                            (val_var) = &(hm)->table.data[_i].data[_j].value, 1); \
+#define ds_hm_foreach(hm, key_var, val_var)                                      \
+    __typeof__((hm)->table.data[0].data[0].key) key_var;                         \
+    __typeof__((hm)->table.data[0].data[0].value) val_var;                       \
+    for (size_t _i = 0; _i < (hm)->table.length; _i++)                           \
+        for (size_t _j = 0; _j < (hm)->table.data[_i].length &&                  \
+                            ((key_var) = (hm)->table.data[_i].data[_j].key,      \
+                            (val_var) = (hm)->table.data[_i].data[_j].value, 1); \
              _j++)
 
 /**
@@ -592,6 +603,168 @@ ds_hm_foreach(&hm, key, value) {
         }                                                    \
         ds_da_free(&(hm)->table);                            \
     } while (0)
+
+/**
+ * Declare an hash set.
+ * Example:
+ *   `ds_hm_declare(my_map, int, const char *);`
+ *
+```c
+This will create an hash set of int keys and const char values like this:
+// Key-Value pair structure
+typedef struct {
+    int key;
+    const char *value;
+} my_map_Kv;
+// Dynamic array of key-value pairs
+typedef struct {
+    my_map_Kv *data;
+    size_t length;
+    size_t capacity;
+} my_map_Da;
+// Hash set structure
+typedef struct {
+    my_map_Da *table;
+    size_t (*hfn)(int);
+    int (*eqfn)(int, int);
+    size_t length;
+} my_map;
+```
+ * You can customize the hash function and equality function for your specific key type.
+ * `my_map hm = {.hfn = my_hash_function, .eqfn = my_eq_function};`
+ * The hash function should follow the signature `size_t hash_function(key_t key);`
+ * The equality function should follow the signature `int eq_function(key_t a, key_t b);`
+ */
+#define ds_hs_declare(name, val_t)         \
+    ds_da_declare(name##_Da, val_t);        \
+    ds_da_declare(name##_Table, name##_Da); \
+    typedef struct {                        \
+        name##_Table table;                 \
+        size_t (*hfn)(val_t);               \
+        int (*eqfn)(val_t, val_t);          \
+        size_t length;                      \
+    } name
+
+/**
+ * Check if a value exists in the set.
+ * Returns true if the key is found, false otherwise.
+ * Example:
+ ```c
+ ds_hs_declare(my_map, int);
+ ...
+    bool has = ds_hs_has(&hm, 42);
+    printf("%s\n", has ? "found" : "not found");
+ ```
+ */
+#define ds_hs_has(hm, val)                                                       \
+    ({                                                                            \
+        bool _has = false;                                                        \
+        if ((hm)->table.length) {                                                 \
+            size_t _hash = _ds_hm_hfn((hm), (val)) % (hm)->table.length;          \
+            for (size_t _i = 0; _i < (hm)->table.data[_hash].length; _i++) {      \
+                if (_ds_hm_eqfn((hm), (hm)->table.data[_hash].data[_i], (val))) { \
+                    _has = true;                                                  \
+                    break;                                                        \
+                }                                                                 \
+            }                                                                     \
+        }                                                                         \
+        _has;                                                                     \
+    })
+
+#define _ds_hs_resize(set)                                                                    \
+    do {                                                                                       \
+        size_t new_capacity = (set)->table.length == 0 ? 1 : (set)->table.length * 2;          \
+        __typeof__((set)->table) new_table = {0};                                              \
+        ds_da_reserve(&new_table, new_capacity);                                               \
+        new_capacity = new_table.length = new_table.capacity;                                  \
+        memset(new_table.data, 0, new_capacity * sizeof(*new_table.data));                     \
+        for (size_t _i = 0; _i < (set)->table.length; _i++) {                                  \
+            for (size_t _j = 0; _j < (set)->table.data[_i].length; _j++) {                     \
+                __typeof__((set)->table.data[_i].data[_j]) v = (set)->table.data[_i].data[_j]; \
+                size_t _h = _ds_hm_hfn((set), v) % new_capacity;                               \
+                ds_da_append(&new_table.data[_h], v);                                          \
+            }                                                                                  \
+        }                                                                                      \
+        ds_da_free(&(set)->table);                                                             \
+        (set)->table = new_table;                                                              \
+    } while (0)
+
+/**
+ * Add a value to the hash set.
+ * Example:
+```c
+ds_hs_declare(my_set, int);
+...
+    my_set set = {0};
+    ds_hs_add(&set, 42);
+```
+ */
+#define ds_hs_add(set, val)                                                                        \
+    do {                                                                                            \
+        if ((set)->table.length == 0 || (set)->length >= (set)->table.length * DS_HM_LOAD_FACTOR) { \
+            _ds_hs_resize(set);                                                                    \
+        }                                                                                           \
+        size_t _hash = _ds_hm_hfn((set), (val)) % (set)->table.length;                              \
+        size_t _i;                                                                                  \
+        for (_i = 0; _i < (set)->table.data[_hash].length; _i++) {                                  \
+            if (_ds_hm_eqfn((set), (set)->table.data[_hash].data[_i], (val))) {                     \
+                (set)->table.data[_hash].data[_i] = (val);                                          \
+                break;                                                                              \
+            }                                                                                       \
+        }                                                                                           \
+        if (_i == (set)->table.data[_hash].length) {                                                \
+            ds_da_append(&(set)->table.data[_hash], val);                                           \
+            (set)->length++;                                                                        \
+        }                                                                                           \
+    } while (0)
+
+/**
+ * Remove a value from the hash set and return a pointer to it, or NULL if not found.
+ * Example:
+ ```c
+ bool has = ds_hs_remove(&hm, 42);
+ ```
+ */
+#define ds_hs_remove(set, val)                                                 \
+    ({                                                                          \
+        bool _has = false;                                                      \
+        size_t _hash = _ds_hm_hfn((set), (val)) % (set)->table.length;          \
+        for (size_t _i = 0; _i < (set)->table.data[_hash].length; _i++) {       \
+            if (_ds_hm_eqfn((set), (set)->table.data[_hash].data[_i], (val))) { \
+                _has = true;                                                    \
+                ds_da_remove(&(set)->table.data[_hash], _i, 1);                 \
+                (set)->length--;                                                \
+            }                                                                   \
+        }                                                                       \
+        _has;                                                                   \
+    })
+
+/**
+ * Loop over all the values in the set.
+ * It will define `value` variable containing the current value.
+ * It also defines internal loop variables `_i` and `_j`, wrap in a block to avoid name clashes.
+ * Example:
+```c
+{
+    ds_hs_foreach(&set, value) {
+        printf("Value: %d\n", value);
+    }
+}
+```
+ */
+#define ds_hs_foreach(set, val_var)                                         \
+    __typeof__((set)->table.data[0].data[0]) val_var;                        \
+    for (size_t _i = 0; _i < (set)->table.length; _i++)                      \
+        for (size_t _j = 0; _j < (set)->table.data[_i].length &&             \
+                            ((val_var) = (set)->table.data[_i].data[_j], 1); \
+             _j++)
+
+/**
+ * Free the hash set.
+ * It will not free the keys or values themselves.
+ * You should free the keys and values separately if needed.
+ */
+#define ds_hs_free ds_hm_free
 
 /**
  * Declare a linked list.
@@ -724,9 +897,11 @@ typedef struct {
     size_t length;
 } DsStringIterator;
 
-#define ds_str_iter(str) (DsStringIterator){.data = (str)->data, .length = (str)->length}
+#define ds_str_iter(str) \
+    (DsStringIterator) { .data = (str)->data, .length = (str)->length }
 
-#define ds_cstr_iter(str) (DsStringIterator){.data = (str), .length = strlen(str)}
+#define ds_cstr_iter(str) \
+    (DsStringIterator) { .data = (str), .length = strlen(str) }
 
 /**
  * Move a string iterator by a delimiter.
@@ -753,7 +928,6 @@ DsStringIterator ds_str_split(DsStringIterator *it, char sep);
  */
 bool ds_mkdir_p(const char *path);
 
-
 /** dirent shims for windows */
 #define DT_FILE 0x8
 #ifdef _WIN32
@@ -763,7 +937,7 @@ bool ds_mkdir_p(const char *path);
 
 struct dirent {
     unsigned char d_type;
-    char d_name[MAX_PATH+1];
+    char d_name[MAX_PATH + 1];
 };
 typedef struct {
     HANDLE hFind;
@@ -1004,11 +1178,11 @@ bool ds_mkdir_p(const char *path) {
         if (part.length == 1 && part.data[0] == '.') continue;
         ds_da_append_many(&tmp_path, part.data, part.length);
         ds_str_append(&tmp_path, "/");
-        #ifdef _WIN32
+#ifdef _WIN32
         int result = mkdir(tmp_path.data);
-        #else
+#else
         int result = mkdir(tmp_path.data, 0755);
-        #endif
+#endif
         if (result < 0) {
             if (errno != EEXIST) {
                 ds_log(DS_LOG_ERROR, "Could not create directory `%s`: %s", tmp_path.data,
@@ -1023,13 +1197,12 @@ bool ds_mkdir_p(const char *path) {
 }
 
 #ifdef _WIN32
-DIR *opendir(const char *path)
-{
+DIR *opendir(const char *path) {
     assert(path);
 
     char buffer[MAX_PATH];
     snprintf(buffer, MAX_PATH, "%s\\*", path);
-    DIR *dir = (DIR*)DS_ALLOC(sizeof(DIR));
+    DIR *dir = (DIR *)DS_ALLOC(sizeof(DIR));
 
     dir->hFind = FindFirstFile(buffer, &dir->data);
     if (dir->hFind == INVALID_HANDLE_VALUE) {
@@ -1040,13 +1213,12 @@ DIR *opendir(const char *path)
     return dir;
 }
 
-struct dirent *readdir(DIR *dir)
-{
+struct dirent *readdir(DIR *dir) {
     assert(dir);
 
     if (dir->dirent == NULL) {
         dir->dirent = DS_ALLOC(sizeof(struct dirent));
-    } else if(!FindNextFile(dir->hFind, &dir->data)) {
+    } else if (!FindNextFile(dir->hFind, &dir->data)) {
         return NULL;
     }
 
@@ -1065,11 +1237,10 @@ struct dirent *readdir(DIR *dir)
     return dir->dirent;
 }
 
-int closedir(DIR *dir)
-{
+int closedir(DIR *dir) {
     assert(dir);
 
-    if(!FindClose(dir->hFind)) return -1;
+    if (!FindClose(dir->hFind)) return -1;
 
     free(dir->dirent);
     free(dir);
@@ -1123,6 +1294,12 @@ int closedir(DIR *dir)
 #define hm_remove ds_hm_remove
 #define hm_foreach ds_hm_foreach
 #define hm_free ds_hm_free
+#define hs_declare ds_hs_declare
+#define hs_has ds_hs_has
+#define hs_add ds_hs_add
+#define hs_remove ds_hs_remove
+#define hs_foreach ds_hs_foreach
+#define hs_free ds_hs_free
 #define ll_declare ds_ll_declare
 #define ll_push ds_ll_push
 #define ll_append ds_ll_append
@@ -1137,4 +1314,3 @@ int closedir(DIR *dir)
 #define cstr_iter ds_cstr_iter
 #define mkdir_p ds_mkdir_p
 #endif
-
