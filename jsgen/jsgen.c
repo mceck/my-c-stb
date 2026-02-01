@@ -1,6 +1,7 @@
 #define STB_C_LEXER_IMPLEMENTATION
 #include "stb_c_lexer.h"
 #define DS_NO_PREFIX
+#define DS_IMPLEMENTATION
 #include "ds.h"
 #include <stdbool.h>
 #include <string.h>
@@ -49,9 +50,9 @@ typedef struct {
 #define sb_cat_line(sb, indent, ...)           \
     do {                                       \
         for (int i = 0; i < (indent) * 4; ++i) \
-            sb_append(sb, " ");                \
-        sb_append(sb, __VA_ARGS__);            \
-        sb_append(sb, "\n");                   \
+            str_append(sb, " ");                \
+        str_append(sb, __VA_ARGS__);            \
+        str_append(sb, "\n");                   \
     } while (0)
 
 const char *js_getalias(Field *field) {
@@ -185,6 +186,9 @@ void handle_id(Parser *p) {
         return;
     }
     if (!p->can_generate) return;
+    if (strcmp(p->lex->string, "const") == 0) {
+        stb_c_lexer_get_token(p->lex);
+    }
     if (strcmp(p->lex->string, "typedef") == 0)
         p->in_typedef = 1;
     else if (strcmp(p->lex->string, "struct") == 0) {
@@ -393,20 +397,20 @@ void generate_model_code(String *sb, Model *model) {
         indent++;
 
         for (int i = 0; i < indent * 4; ++i)
-            sb_append(sb, " ");
+            str_append(sb, " ");
         for (size_t i = 0; i < model->fields.length; ++i) {
             Field *field = &model->fields.data[i];
             if (field->is_counter_field) continue;
-            if (i > 0) sb_append(sb, "} else ");
-            sb_append(sb, "if (strcmp(jsp->string, \"", js_getalias(field), "\") == 0) {\n");
+            if (i > 0) str_append(sb, "} else ");
+            str_append(sb, "if (strcmp(jsp->string, \"", js_getalias(field), "\") == 0) {\n");
             gen_parse_field_body(sb, field, indent + 1);
             for (int j = 0; j < indent * 4; ++j)
-                sb_append(sb, " ");
+                str_append(sb, " ");
         }
         if (model->fields.length > 0)
-            sb_append(sb, "} else {\n");
+            str_append(sb, "} else {\n");
         else
-            sb_append(sb, "{\n");
+            str_append(sb, "{\n");
 
         sb_cat_line(sb, indent + 1, "err = jsp_skip(jsp);");
         sb_cat_line(sb, indent + 1, "if (err) return err;");
@@ -418,7 +422,7 @@ void generate_model_code(String *sb, Model *model) {
         sb_cat_line(sb, indent, "return err;");
         indent--;
         sb_cat_line(sb, indent, "}");
-        sb_append(sb, "\n");
+        str_append(sb, "\n");
 
         sb_cat_line(sb, indent, "int parse_", model->simple_name, "(const char *json, ", model->name, " *out, JsGenAllocator *a) {");
         indent++;
@@ -430,7 +434,7 @@ void generate_model_code(String *sb, Model *model) {
         sb_cat_line(sb, indent, "return err;");
         indent--;
         sb_cat_line(sb, indent, "}");
-        sb_append(sb, "\n");
+        str_append(sb, "\n");
 
         sb_cat_line(sb, indent, "int _parse_", model->simple_name, "_list(Jsp *jsp, ", model->name, " **out, size_t *out_count, JsGenAllocator *a) {");
         indent++;
@@ -459,7 +463,7 @@ void generate_model_code(String *sb, Model *model) {
         sb_cat_line(sb, indent, "return err;");
         indent--;
         sb_cat_line(sb, indent, "}");
-        sb_append(sb, "\n");
+        str_append(sb, "\n");
     }
     if (model->stringify) {
         sb_cat_line(sb, indent, "int _stringify_", model->simple_name, "(Jsb *jsb, ", model->name, " *in) {");
@@ -475,7 +479,7 @@ void generate_model_code(String *sb, Model *model) {
         sb_cat_line(sb, indent, "return jsb_end_object(jsb);");
         indent--;
         sb_cat_line(sb, indent, "}");
-        sb_append(sb, "\n");
+        str_append(sb, "\n");
 
         sb_cat_line(sb, indent, "char* stringify_", model->simple_name, "_indent(", model->name, " *in, int indent) {");
         indent++;
@@ -487,10 +491,10 @@ void generate_model_code(String *sb, Model *model) {
         sb_cat_line(sb, indent, "return jsb_get(&jsb);");
         indent--;
         sb_cat_line(sb, indent, "}");
-        sb_append(sb, "\n");
+        str_append(sb, "\n");
 
         sb_cat_line(sb, indent, "#define stringify_", model->simple_name, "(in) stringify_", model->simple_name, "_indent((in), 0)");
-        sb_append(sb, "\n");
+        str_append(sb, "\n");
 
         sb_cat_line(sb, indent, "char* stringify_", model->simple_name, "_list_indent(", model->name, " *in, size_t count, int indent) {");
         indent++;
@@ -503,15 +507,15 @@ void generate_model_code(String *sb, Model *model) {
         sb_cat_line(sb, indent, "return jsb_get(&jsb);");
         indent--;
         sb_cat_line(sb, indent, "}");
-        sb_append(sb, "\n");
+        str_append(sb, "\n");
         sb_cat_line(sb, indent, "#define stringify_", model->simple_name, "_list(in, count) stringify_", model->simple_name, "_list_indent((in), (count), 0)");
-        sb_append(sb, "\n");
+        str_append(sb, "\n");
     }
 }
 
 int generate_all_code(const char *out_filename, Models *models) {
     String sb = {0};
-    sb_append(&sb, "#include \"jsb.h\"\n#include \"jsp.h\"\n\n");
+    str_append(&sb, "#include \"jsb.h\"\n#include \"jsp.h\"\n\n");
     da_foreach(models, model) {
         generate_model_code(&sb, model);
     }

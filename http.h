@@ -21,6 +21,14 @@
     // POST url with data
     response = http(url, .method = HTTP_POST, .body="data");
     http_free_response(&response);
+    // Streaming response (e.g., LLM APIs)
+    size_t on_chunk(const char *chunk, size_t len, HttpStreamContext *ctx) {
+        (void)ctx;
+        fwrite(chunk, 1, len, stdout);
+        return len; // return number of bytes processed
+    }
+    response = http(url, .method = HTTP_POST, .body=json, .stream_callback = on_chunk);
+    http_free_response(&response);
 ```
  */
 
@@ -45,6 +53,23 @@ typedef enum {
 
 ds_da_declare(HttpHeaders, const char *);
 
+typedef struct HttpStreamContext HttpStreamContext;
+/**
+ * Callback for streaming responses.
+ * @param chunk The chunk of data received.
+ * @param len The length of the chunk.
+ * @param ctx The HTTP stream context.
+ * @return The number of bytes processed.
+ */
+typedef size_t (*HttpStreamCallback)(const char *contents, size_t total, HttpStreamContext *ctx);
+
+
+typedef struct HttpStreamContext {
+    HttpStreamCallback callback;
+    void *userdata;
+    DsString *body;
+} HttpStreamContext;
+
 typedef struct {
     long status_code;
     DsString body;
@@ -55,6 +80,8 @@ typedef struct {
     HttpMethod method;
     HttpHeaders *headers;
     const char *body;
+    HttpStreamCallback stream_callback;
+    void *stream_userdata;
 } HttpRequestOpts;
 
 #define http_free_response(resp) ds_da_free(&(resp)->body)
@@ -65,7 +92,9 @@ static CURLcode http_set_method(CURL *curl, const HttpMethod method);
 
 static CURLcode http_set_headers(CURL *curl, const HttpHeaders *headers, struct curl_slist **header_list);
 
-static size_t write_callback(void *contents, size_t size, size_t nmemb, void *userp);
+static size_t write_callback(const char *contents, size_t total, HttpStreamContext *ctx);
+
+static size_t stream_write_callback(void *contents, size_t size, size_t nmemb, void *userdata);
 
 /**
  * Sends an HTTP request.
@@ -73,9 +102,11 @@ static size_t write_callback(void *contents, size_t size, size_t nmemb, void *us
  * @param method The HTTP method to use.
  * @param headers The headers to include in the request, can be NULL.
  * @param body The body of the request, can be NULL.
+ * @param stream_callback Callback for streaming responses, can be NULL.
+ * @param stream_userdata User-defined data passed to the stream callback, can be NULL.
  * @return An HttpResponse struct containing the response data.
  */
-HttpResponse http_request(const char *url, const HttpMethod method, const HttpHeaders *headers, const char *body);
+HttpResponse http_request(const char *url, const HttpMethod method, const HttpHeaders *headers, const char *body, HttpStreamCallback stream_callback, void *stream_userdata);
 
 HttpResponse http_request_opts(const char *url, HttpRequestOpts opts);
 
@@ -113,23 +144,28 @@ static CURLcode http_set_headers(CURL *curl, const HttpHeaders *headers, struct 
     return res;
 }
 
-static size_t write_callback(void *contents, size_t size, size_t nmemb, void *userp) {
-    size_t total = size * nmemb;
-    DsString *str = (DsString *)userp;
-    ds_da_append_many(str, (char *)contents, total);
-    ds_str_append(str);
+static size_t write_callback(const char *contents, size_t total, HttpStreamContext *ctx) {
+    ds_da_append_many(ctx->body, (char *)contents, total);
+    ds_str_append(ctx->body);
     return total;
 }
 
-HttpResponse http_request_opts(const char *url, HttpRequestOpts opts) {
-    return http_request(url, opts.method, opts.headers, opts.body);
+static size_t stream_write_callback(void *contents, size_t size, size_t nmemb, void *userdata) {
+    HttpStreamContext *ctx = (HttpStreamContext *)userdata;
+    return ctx->callback(contents, size * nmemb, ctx);
 }
 
-HttpResponse http_request(const char *url, const HttpMethod method, const HttpHeaders *headers, const char *body) {
+HttpResponse http_request_opts(const char *url, HttpRequestOpts opts) {
+    return http_request(url, opts.method, opts.headers, opts.body, opts.stream_callback, opts.stream_userdata);
+}
+
+HttpResponse http_request(const char *url, const HttpMethod method, const HttpHeaders *headers, const char *body, HttpStreamCallback stream_callback, void *stream_userdata) {
     CURL *curl;
     struct curl_slist *header_list = NULL;
     CURLcode res = CURLE_FAILED_INIT;
     HttpResponse response = {0};
+    HttpStreamContext stream_ctx = {0};
+    stream_ctx.body = &response.body;
     curl = curl_easy_init();
     if (!curl) goto cleanup;
     res = curl_easy_setopt(curl, CURLOPT_URL, url);
@@ -145,9 +181,15 @@ HttpResponse http_request(const char *url, const HttpMethod method, const HttpHe
         if (res) goto cleanup;
     }
 
-    res = curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_callback);
+    if (stream_callback) {
+        stream_ctx.callback = stream_callback;
+    } else {
+        stream_ctx.callback = write_callback;
+    }
+    stream_ctx.userdata = stream_userdata;
+    res = curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, stream_write_callback);
     if (res) goto cleanup;
-    res = curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response.body);
+    res = curl_easy_setopt(curl, CURLOPT_WRITEDATA, &stream_ctx);
     if (res) goto cleanup;
 
     res = curl_easy_perform(curl);
