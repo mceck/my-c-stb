@@ -528,7 +528,7 @@ int main(int argc, char **argv) {
     Models models = {0};
     char out_filename[256] = "models.g.h";
     if (argc < 2) {
-        printf("Usage: %s <input_file.h> [-o output_file.h]\n", argv[0]);
+        printf("Usage: %s <input_file.h or dir> [-o output_file.h]\n", argv[0]);
         return -1;
     }
 
@@ -536,8 +536,27 @@ int main(int argc, char **argv) {
         if (strcmp(argv[i], "-o") == 0 && i + 1 < argc) {
             strncpy(out_filename, argv[++i], sizeof(out_filename) - 1);
         } else {
-            if (parse_file(argv[i], &models) != 0) {
-                return -1;
+            DIR *dir = opendir(argv[i]);
+            if(!dir) {
+                if (parse_file(argv[i], &models) != 0) {
+                    printf("Failed to parse file: %s\n", argv[i]);
+                    return -1;
+                }
+            } else {
+                struct dirent *entry;
+                while ((entry = readdir(dir)) != NULL) {
+                    if (entry->d_type == DT_REG) {
+                        const char *ext = strrchr(entry->d_name, '.');
+                        if (ext && strcmp(ext, ".h") == 0) {
+                            char filepath[512];
+                            snprintf(filepath, sizeof(filepath), "%s/%s", argv[i], entry->d_name);
+                            if (parse_file(filepath, &models) != 0) {
+                                printf("Failed to parse file: %s\n", filepath);
+                            }
+                        }
+                    }
+                }
+                closedir(dir);
             }
         }
     }
