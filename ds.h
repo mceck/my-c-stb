@@ -1032,6 +1032,136 @@ bool ds_ends_with_sn(const char *str, const char *suffix, size_t str_len, size_t
  */
 bool ds_mkdir_p(const char *path);
 
+/** Arena allocator */
+typedef struct DsRegion {
+    size_t size;
+    size_t capacity;
+    struct DsRegion *next;
+    uintptr_t items[];
+} DsRegion;
+
+typedef struct DsRRegion {
+    size_t size;
+    struct DsRRegion *next;
+    uintptr_t items[];
+} DsRRegion;
+
+/**
+ * Arena allocator structure.
+ * Better for allocating many small objects with similar lifetimes.
+ */
+typedef struct {
+    DsRegion *start, *end;
+} DsArena;
+
+/**
+ * Full region arena allocator structure.
+ * Better for allocating dynamic sized objects and bigger objects.
+ */
+typedef struct {
+    DsRRegion *start, *end;
+} DsRArena;
+
+typedef struct {
+    DsRegion *region;
+    size_t size;
+} DsArenaSnapshot;
+
+#define DS_MIN_ALLOC_REGION (16 * 1024)
+/**
+ * Allocate memory from the arena.
+ * Example:
+```c
+DsArena arena = {0};
+int *arr = ds_a_malloc(&arena, 10 * sizeof(int));
+```
+ */
+void *ds_a_malloc(DsArena *a, size_t size);
+void *ds_a_rmalloc(DsRArena *a, size_t size);
+/**
+ * Reallocate memory from the arena.
+ * Example:
+```c
+DsArena arena = {0};
+int *arr = ds_a_malloc(&arena, 10 * sizeof(int));
+arr = ds_a_realloc(&arena, arr, 10 * sizeof(int), 20 * sizeof(int));
+```
+ */
+void *ds_a_realloc(DsArena *a, void *ptr, size_t old_size, size_t new_size);
+void *ds_a_rrealloc(DsRArena *a, void *ptr, size_t new_size);
+/**
+ * Free all memory allocated from the arena.
+ * Example:
+```c
+DsArena arena = {0};
+int *arr = ds_a_malloc(&arena, 10 * sizeof(int));
+ds_a_free(&arena);
+```
+ */
+void ds_a_free(DsArena *a);
+void ds_a_rfree(DsRArena *a);
+void ds_a_rfree_one(DsRArena *a, void *ptr);
+
+/**
+ * Take a snapshot of the arena state.
+ * You can restore the arena to this state later.
+ * Example:
+```c
+DsArena arena = {0};
+int *arr1 = ds_a_malloc(&arena, 10 * sizeof(int));
+DsArenaSnapshot snap = ds_a_snapshot(&arena);
+int *arr2 = ds_a_malloc(&arena, 20 * sizeof(int));
+ds_a_restore(&arena, snap);
+// arr2 is now invalid, and the arena is back to the state after arr1 allocation
+```
+ */
+DsArenaSnapshot ds_a_snapshot(DsArena *a);
+/**
+ * Restore the arena to a previous snapshot.
+ * All memory allocated after the snapshot will be freed.
+ * Example:
+```c
+DsArena arena = {0};
+int *arr1 = ds_a_malloc(&arena, 10 * sizeof(int));
+DsArenaSnapshot snap = ds_a_snapshot(&arena);
+int *arr2 = ds_a_malloc(&arena, 20 * sizeof(int));
+ds_a_restore(&arena, snap);
+// arr2 is now invalid, and the arena is back to the state after arr1 allocation
+```
+ */
+void ds_a_restore(DsArena *a, DsArenaSnapshot snapshot);
+
+extern DsArena ds_tmp_allocator;
+/**
+ * Temporary allocations using a global arena allocator.
+ */
+void *ds_tmp_alloc(size_t size);
+/**
+ * Temporary reallocations using a global arena allocator.
+ */
+void *ds_tmp_realloc(void *ptr, size_t old_size, size_t new_size);
+/**
+ * Free all temporary allocations.
+ */
+void ds_tmp_free();
+/**
+ * Duplicate a string using the temporary allocator.
+ */
+char* ds_tmp_strndup(const char* str, size_t len);
+#define ds_tmp_strdup(str) ds_tmp_strndup((str), strlen(str))
+/**
+ * Formatted string allocation using the temporary allocator.
+ */
+char* ds_tmp_sprintf(const char* fmt, ...);
+/**
+ * Take a snapshot of the temporary allocator state.
+ */
+#define ds_tmp_snapshot() ds_a_snapshot(&ds_tmp_allocator)
+/**
+ * Restore the temporary allocator to a previous snapshot.
+ */
+#define ds_tmp_restore(snap) ds_a_restore(&ds_tmp_allocator, (snap))
+
 /** dirent shims for windows */
 #define DT_FILE 0x8
 #ifdef _WIN32
@@ -1392,6 +1522,190 @@ bool ds_ends_with_sn(const char *str, const char *suffix, size_t str_len, size_t
     return strncmp(str + str_len - len, suffix, len) == 0;
 }
 
+void *ds_a_malloc(DsArena *a, size_t size) {
+    if (size == 0) return NULL;
+    size = (size + sizeof(uintptr_t) - 1) & ~(sizeof(uintptr_t) - 1);
+    if (!a->end || a->end->size + size > a->end->capacity) {
+        size_t region_size = DS_MIN_ALLOC_REGION;
+        if (size + sizeof(DsRegion) > region_size) {
+            region_size = size + sizeof(DsRegion);
+        }
+        DsRegion *r = DS_ALLOC(region_size);
+        if (!r) return NULL;
+        r->size = 0;
+        r->capacity = region_size - sizeof(DsRegion);
+        r->next = NULL;
+        if (a->end) {
+            a->end->next = r;
+            a->end = r;
+        } else {
+            a->start = a->end = r;
+        }
+    }
+    void *ptr = (void *)((uintptr_t)a->end->items + a->end->size);
+    a->end->size += size;
+    return ptr;
+}
+
+void *ds_a_rmalloc(DsRArena *a, size_t size) {
+    if (size == 0) return NULL;
+    size = (size + sizeof(uintptr_t) - 1) & ~(sizeof(uintptr_t) - 1);
+    DsRRegion *r = DS_ALLOC(size + sizeof(DsRRegion));
+    if (!r) return NULL;
+    r->size = size;
+    r->next = NULL;
+    if (a->end) {
+        a->end->next = r;
+        a->end = r;
+    } else {
+        a->start = a->end = r;
+    }
+    return r->items;
+}
+
+void *ds_a_realloc(DsArena *a, void *ptr, size_t old_size, size_t new_size) {
+    if (new_size == 0 || new_size <= old_size) return NULL;
+    void *new_ptr = ds_a_malloc(a, new_size);
+    if (!new_ptr) return NULL;
+    if (ptr && old_size > 0) {
+        memcpy(new_ptr, ptr, old_size);
+    }
+    return new_ptr;
+}
+
+void *ds_a_rrealloc(DsRArena *a, void *ptr, size_t new_size) {
+    if (new_size == 0) return NULL;
+    if (!ptr) {
+        return ds_a_rmalloc(a, new_size);
+    }
+    new_size = (new_size + sizeof(uintptr_t) - 1) & ~(sizeof(uintptr_t) - 1);
+    DsRRegion *r = (DsRRegion *)ptr - 1;
+    DsRRegion * new_r = DS_REALLOC(r, sizeof(DsRRegion) + new_size);
+    if (!new_r) return NULL;
+    new_r->size = new_size;
+    if (r != new_r) {
+        DsRRegion *curr = a->start;
+        DsRRegion *prev = NULL;
+        while (curr) {
+            if (curr == r) {
+                if (prev) {
+                    prev->next = new_r;
+                } else {
+                    a->start = new_r;
+                }
+                if (a->end == r) {
+                    a->end = new_r;
+                }
+                break;
+            }
+            prev = curr;
+            curr = curr->next;
+        }
+    }
+    return new_r->items;
+}
+
+void ds_a_free(DsArena *a) {
+    DsRegion *r = a->start;
+    while (r) {
+        DsRegion *next = r->next;
+        DS_FREE(r);
+        r = next;
+    }
+    a->start = a->end = NULL;
+}
+
+void ds_a_rfree(DsRArena *a) {
+    DsRRegion *r = a->start;
+    while (r) {
+        DsRRegion *next = r->next;
+        DS_FREE(r);
+        r = next;
+    }
+    a->start = a->end = NULL;
+}
+
+void ds_a_rfree_one(DsRArena *a, void *ptr) {
+    DsRRegion *r = (DsRRegion *)ptr - 1;
+    DsRRegion *curr = a->start;
+    DsRRegion *prev = NULL;
+    while (curr) {
+        if (curr == r) {
+            if (prev) {
+                prev->next = curr->next;
+            } else {
+                a->start = curr->next;
+            }
+            if (a->end == curr) {
+                a->end = prev;
+            }
+            DS_FREE(curr);
+            return;
+        }
+        prev = curr;
+        curr = curr->next;
+    }
+}
+
+DsArenaSnapshot ds_a_snapshot(DsArena *a) {
+    DsArenaSnapshot snapshot = {0};
+    snapshot.region = a->end;
+    if (a->end) snapshot.size = a->end->size;
+    return snapshot;
+}
+
+void ds_a_restore(DsArena *a, DsArenaSnapshot snapshot) {
+    if(!snapshot.region) {
+        ds_a_free(a);
+        return;
+    }
+    a->end = snapshot.region;
+    a->end->size = snapshot.size;
+    DsRegion *r = a->end ? a->end->next : NULL;
+    while (r) {
+        DsRegion *next = r->next;
+        DS_FREE(r);
+        r = next;
+    }
+}
+
+DsArena ds_tmp_allocator = {0};
+
+void *ds_tmp_alloc(size_t size) {
+    return ds_a_malloc(&ds_tmp_allocator, size);
+}
+void *ds_tmp_realloc(void *ptr, size_t old_size, size_t new_size) {
+    return ds_a_realloc(&ds_tmp_allocator, ptr, old_size, new_size);
+}
+void ds_tmp_free() {
+    ds_a_free(&ds_tmp_allocator);
+}
+
+char* ds_tmp_strndup(const char* str, size_t len) {
+    char* tmp_str = ds_tmp_alloc(len + 1);
+    if (tmp_str) {
+        memcpy(tmp_str, str, len);
+        tmp_str[len] = '\0';
+    }
+    return tmp_str;
+}
+
+char* ds_tmp_sprintf(const char* fmt, ...) {
+    va_list args;
+    va_start(args, fmt);
+    int n = vsnprintf(NULL, 0, fmt, args);
+    va_end(args);
+    if (n < 0) return NULL;
+    char* tmp_str = ds_tmp_alloc(n + 1);
+    if (!tmp_str) return NULL;
+    va_start(args, fmt);
+    vsnprintf(tmp_str, n + 1, fmt, args);
+    va_end(args);
+    return tmp_str;
+}
+
+
+
 #ifdef _WIN32
 DIR *opendir(const char *path) {
     assert(path);
@@ -1536,4 +1850,25 @@ int closedir(DIR *dir) {
 #define ends_with_sn ds_ends_with_sn
 #define ends_with_n ds_ends_with_n
 #define ends_with_s ds_ends_with_s
+#define Arena DsArena
+#define RArena DsRArena
+#define ArenaSnapshot DsArenaSnapshot
+#define RArenaSnapshot DsRArenaSnapshot
+#define a_malloc ds_a_malloc
+#define a_realloc ds_a_realloc
+#define a_free ds_a_free
+#define a_rmalloc ds_a_rmalloc
+#define a_rrealloc ds_a_rrealloc
+#define a_rfree ds_a_rfree
+#define a_rfree_one ds_a_rfree_one
+#define a_snapshot ds_a_snapshot
+#define a_restore ds_a_restore
+#define tmp_alloc ds_tmp_alloc
+#define tmp_realloc ds_tmp_realloc
+#define tmp_free ds_tmp_free
+#define tmp_strndup ds_tmp_strndup
+#define tmp_strdup ds_tmp_strdup
+#define tmp_sprintf ds_tmp_sprintf
+#define tmp_snapshot ds_tmp_snapshot
+#define tmp_restore ds_tmp_restore
 #endif

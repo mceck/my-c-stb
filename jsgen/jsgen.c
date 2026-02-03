@@ -275,7 +275,7 @@ void gen_parse_field_body(String *sb, Field *field, int indent) {
                 sb_cat_line(sb, indent + 1, "jsp->off++;");
                 sb_cat_line(sb, indent, "}");
                 sb_cat_line(sb, indent, "size_t fldlen = jsp->off - start;");
-                sb_cat_line(sb, indent, "out->", field->name, " = jsgen_malloc(a, fldlen + 1);");
+                sb_cat_line(sb, indent, "out->", field->name, " = jsgen_malloc(fldlen + 1);");
                 sb_cat_line(sb, indent, "memcpy(out->", field->name, ", &jsp->buffer[start], fldlen);");
                 sb_cat_line(sb, indent, "out->", field->name, "[fldlen] = '\\0';");
                 sb_cat_line(sb, indent, "jsp_skip_end(jsp);");
@@ -284,7 +284,7 @@ void gen_parse_field_body(String *sb, Field *field, int indent) {
                 sb_cat_line(sb, indent, "size_t s_len = jsp->string ? strlen(jsp->string) : 0;");
                 if (field->has_counter) sb_cat_line(sb, indent, "out->", field->counter_field, " = s_len;");
                 sb_cat_line(sb, indent, "if(s_len > 0) {");
-                sb_cat_line(sb, indent + 1, "out->", field->name, " = jsgen_malloc(a, s_len + 1);");
+                sb_cat_line(sb, indent + 1, "out->", field->name, " = jsgen_malloc(s_len + 1);");
                 sb_cat_line(sb, indent + 1, "strcpy(out->", field->name, ", jsp->string);");
                 sb_cat_line(sb, indent, "} else {");
                 sb_cat_line(sb, indent + 1, "out->", field->name, " = NULL;");
@@ -301,7 +301,7 @@ void gen_parse_field_body(String *sb, Field *field, int indent) {
         if (field->has_counter) {
             sb_cat_line(sb, indent, "size_t len = jsp_array_length(jsp);");
             sb_cat_line(sb, indent, "out->", field->counter_field, " = len;");
-            sb_cat_line(sb, indent, "out->", field->name, " = jsgen_malloc(a, sizeof(", field->simple_type, ") * len);");
+            sb_cat_line(sb, indent, "out->", field->name, " = jsgen_malloc(sizeof(", field->simple_type, ") * len);");
             sb_cat_line(sb, indent, "for (size_t i = 0; i < len; i++) {");
         } else {
             sb_cat_line(sb, indent, "size_t i = 0;");
@@ -314,7 +314,7 @@ void gen_parse_field_body(String *sb, Field *field, int indent) {
             sb_cat_line(sb, indent + 1, "if (err) break;");
             sb_cat_line(sb, indent + 1, "out->", field->name, "[i] = jsp->", arr_jsp_type, ";");
         } else {
-            sb_cat_line(sb, indent + 1, "err = _parse_", field->simple_type, "(jsp, &out->", field->name, "[i], a);");
+            sb_cat_line(sb, indent + 1, "err = _parse_", field->simple_type, "(jsp, &out->", field->name, "[i], jsgen_malloc);");
             sb_cat_line(sb, indent + 1, "if (err) break;");
         }
         if (!field->has_counter) sb_cat_line(sb, indent + 1, "i++;");
@@ -327,12 +327,12 @@ void gen_parse_field_body(String *sb, Field *field, int indent) {
         sb_cat_line(sb, indent, "if (!err && jsp->type == JSP_TYPE_NULL) {");
         sb_cat_line(sb, indent + 1, "out->", field->name, " = NULL;");
         sb_cat_line(sb, indent, "} else {");
-        sb_cat_line(sb, indent + 1, "out->", field->name, " = jsgen_malloc(a, sizeof(", field->simple_type, "));");
-        sb_cat_line(sb, indent + 1, "err = _parse_", field->simple_type, "(jsp, out->", field->name, ", a);");
+        sb_cat_line(sb, indent + 1, "out->", field->name, " = jsgen_malloc(sizeof(", field->simple_type, "));");
+        sb_cat_line(sb, indent + 1, "err = _parse_", field->simple_type, "(jsp, out->", field->name, ", jsgen_malloc);");
         sb_cat_line(sb, indent + 1, "if (err) return err;");
         sb_cat_line(sb, indent, "}");
     } else {
-        sb_cat_line(sb, indent, "err = _parse_", field->simple_type, "(jsp, &out->", field->name, ", a);");
+        sb_cat_line(sb, indent, "err = _parse_", field->simple_type, "(jsp, &out->", field->name, ", jsgen_malloc);");
         sb_cat_line(sb, indent, "if (err) return err;");
     }
 }
@@ -388,9 +388,8 @@ void generate_model_code(String *sb, Model *model) {
     int indent = 0;
     if (model->parse) {
 
-        sb_cat_line(sb, indent, "int _parse_", model->simple_name, "(Jsp *jsp, ", model->name, " *out, JsGenAllocator *a) {");
+        sb_cat_line(sb, indent, "int _parse_", model->simple_name, "(Jsp *jsp, ", model->name, " *out, JsGenMalloc jsgen_malloc) {");
         indent++;
-        sb_cat_line(sb, indent, "(void)a;");
         sb_cat_line(sb, indent, "int err = jsp_begin_object(jsp);");
         sb_cat_line(sb, indent, "if (err) return err;");
         sb_cat_line(sb, indent, "while (jsp_key(jsp) == 0) {");
@@ -424,27 +423,29 @@ void generate_model_code(String *sb, Model *model) {
         sb_cat_line(sb, indent, "}");
         str_append(sb, "\n");
 
-        sb_cat_line(sb, indent, "int parse_", model->simple_name, "(const char *json, ", model->name, " *out, JsGenAllocator *a) {");
+        sb_cat_line(sb, indent, "int parse_", model->simple_name, "_a(const char *json, ", model->name, " *out, JsGenMalloc jsgen_malloc) {");
         indent++;
         sb_cat_line(sb, indent, "Jsp jsp = {0};");
         sb_cat_line(sb, indent, "int err = jsp_init(&jsp, json, strlen(json));");
         sb_cat_line(sb, indent, "if (err) return err;");
-        sb_cat_line(sb, indent, "err = _parse_", model->simple_name, "(&jsp, out, a);");
+        sb_cat_line(sb, indent, "err = _parse_", model->simple_name, "(&jsp, out, jsgen_malloc);");
         sb_cat_line(sb, indent, "jsp_free(&jsp);");
         sb_cat_line(sb, indent, "return err;");
         indent--;
         sb_cat_line(sb, indent, "}");
         str_append(sb, "\n");
+        sb_cat_line(sb, indent, "#define parse_", model->simple_name, "(json, out) parse_", model->simple_name, "_a((json), (out), JSGEN_MALLOC)");
+        str_append(sb, "\n");
 
-        sb_cat_line(sb, indent, "int _parse_", model->simple_name, "_list(Jsp *jsp, ", model->name, " **out, size_t *out_count, JsGenAllocator *a) {");
+        sb_cat_line(sb, indent, "int _parse_", model->simple_name, "_list(Jsp *jsp, ", model->name, " **out, size_t *out_count, JsGenMalloc jsgen_malloc) {");
         indent++;
         sb_cat_line(sb, indent, "int err = jsp_begin_array(jsp);");
         sb_cat_line(sb, indent, "if (err) return err;");
         sb_cat_line(sb, indent, "size_t len = jsp_array_length(jsp);");
         sb_cat_line(sb, indent, "*out_count = len;");
-        sb_cat_line(sb, indent, "*out = jsgen_malloc(a, sizeof(", model->name, ") * len);");
+        sb_cat_line(sb, indent, "*out = jsgen_malloc(sizeof(", model->name, ") * len);");
         sb_cat_line(sb, indent, "for (size_t i = 0; i < len; i++) {");
-        sb_cat_line(sb, indent + 1, "err = _parse_", model->simple_name, "(jsp, &(*out)[i], a);");
+        sb_cat_line(sb, indent + 1, "err = _parse_", model->simple_name, "(jsp, &(*out)[i], jsgen_malloc);");
         sb_cat_line(sb, indent + 1, "if (err) return err;");
         sb_cat_line(sb, indent, "}");
         sb_cat_line(sb, indent, "err = jsp_end_array(jsp);");
@@ -453,16 +454,18 @@ void generate_model_code(String *sb, Model *model) {
         indent--;
         sb_cat_line(sb, indent, "}");
 
-        sb_cat_line(sb, indent, "int parse_", model->simple_name, "_list(const char *json, ", model->name, " **out, size_t *out_count, JsGenAllocator *a) {");
+        sb_cat_line(sb, indent, "int parse_", model->simple_name, "_list_a(const char *json, ", model->name, " **out, size_t *out_count, JsGenMalloc jsgen_malloc) {");
         indent++;
         sb_cat_line(sb, indent, "Jsp jsp = {0};");
         sb_cat_line(sb, indent, "int err = jsp_init(&jsp, json, strlen(json));");
         sb_cat_line(sb, indent, "if (err) return err;");
-        sb_cat_line(sb, indent, "err = _parse_", model->simple_name, "_list(&jsp, out, out_count, a);");
+        sb_cat_line(sb, indent, "err = _parse_", model->simple_name, "_list(&jsp, out, out_count, jsgen_malloc);");
         sb_cat_line(sb, indent, "jsp_free(&jsp);");
         sb_cat_line(sb, indent, "return err;");
         indent--;
         sb_cat_line(sb, indent, "}");
+        str_append(sb, "\n");
+        sb_cat_line(sb, indent, "#define parse_", model->simple_name, "_list(json, out, out_count) parse_", model->simple_name, "_list_a((json), (out), (out_count), JSGEN_MALLOC)");
         str_append(sb, "\n");
     }
     if (model->stringify) {
@@ -513,28 +516,53 @@ void generate_model_code(String *sb, Model *model) {
     }
 }
 
-int generate_all_code(const char *out_filename, Models *models) {
+int generate_all_code(const char *out_filename, Models *models, char *custom_includes) {
+    String tname = {0};
+    size_t out_len = strlen(out_filename);
+    for (size_t i = 0; i < out_len; ++i) {
+        char c = out_filename[i];
+        if (c >= 'a' && c <= 'z') c -= ('a' - 'A');
+        else if (c == '-' || c == '/' || c == ' ') c = '_';
+        else if (c == '.') break;
+
+        if (c=='_' || (c >= 'A' && c <= 'Z')) da_append(&tname, c);
+    }
+    da_append(&tname, 0);
     String sb = {0};
-    str_append(&sb, "#include \"jsb.h\"\n#include \"jsp.h\"\n\n");
+    str_appendf(&sb, "#ifndef JSGEN_%s_G_H\n#define JSGEN_%s_G_H\n\n", tname.data, tname.data);
+    str_append(&sb, "// *** Auto-generated by jsgen. Do not edit manually. ***\n\n");
+    if (custom_includes) {
+        str_append(&sb, custom_includes);
+        str_append(&sb, "\n");
+    } else {
+        str_append(&sb, "#include \"jsgen.h\"\n");
+        str_append(&sb, "#include \"jsb.h\"\n");
+        str_append(&sb, "#include \"jsp.h\"\n\n");
+    }
     da_foreach(models, model) {
         generate_model_code(&sb, model);
     }
+    str_appendf(&sb, "#endif // JSGEN_%s_G_H\n", tname.data);
     write_entire_file(out_filename, &sb);
     da_free(&sb);
+    da_free(&tname);
     return 0;
 }
 
 int main(int argc, char **argv) {
     Models models = {0};
     char out_filename[256] = "models.g.h";
+    char *custom_includes = NULL;
     if (argc < 2) {
-        printf("Usage: %s <input_file.h or dir> [-o output_file.h]\n", argv[0]);
+        printf("Usage: %s <input_file.h or dir> [-o output_file.h] [-i \"#include <custom_includes>\"]\n", argv[0]);
         return -1;
     }
 
     for (int i = 1; i < argc; ++i) {
         if (strcmp(argv[i], "-o") == 0 && i + 1 < argc) {
             strncpy(out_filename, argv[++i], sizeof(out_filename) - 1);
+        } else if (strcmp(argv[i], "-i") == 0 && i + 1 < argc) {
+            custom_includes = argv[++i];
         } else {
             DIR *dir = opendir(argv[i]);
             if(!dir) {
@@ -546,8 +574,7 @@ int main(int argc, char **argv) {
                 struct dirent *entry;
                 while ((entry = readdir(dir)) != NULL) {
                     if (entry->d_type == DT_REG) {
-                        const char *ext = strrchr(entry->d_name, '.');
-                        if (ext && strcmp(ext, ".h") == 0) {
+                        if (ends_with(entry->d_name, ".h")) {
                             char filepath[512];
                             snprintf(filepath, sizeof(filepath), "%s/%s", argv[i], entry->d_name);
                             if (parse_file(filepath, &models) != 0) {
@@ -561,7 +588,7 @@ int main(int argc, char **argv) {
         }
     }
 
-    generate_all_code(out_filename, &models);
+    generate_all_code(out_filename, &models, custom_includes);
     da_foreach(&models, model) {
         da_free(&model->fields);
     }

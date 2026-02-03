@@ -22,12 +22,11 @@ JSON typedef struct {
 #include "models.g.h" // include the generated code
 ...
     User user = {0};
-    Allocator a = {0}; // the parser will use this allocator for allocations
-    parse_User("{...}", &user, &a);
+    parse_User("{...}", &user);
     char *json_str = stringify_User(&user);
     printf("User as JSON: %s\n", json_str);
-    jsgen_free(&a);
     free(json_str);
+    jsgen_free(); // free jsgen internal allocations
 ```
  */
 #ifndef JSGEN_H
@@ -36,12 +35,17 @@ JSON typedef struct {
 #include <stdlib.h>
 #include <stdint.h>
 #include <string.h>
+
+#define JSGEN_BASIC_ALLOC_SIZE (8 * 1024 * 1024)
+// Basic allocator for jsgen parsing
+void *jsgen_basic_alloc(size_t size);
+void jsgen_free();
+
 #ifndef JSGEN_MALLOC
-#define JSGEN_MALLOC malloc
+#define JSGEN_MALLOC jsgen_basic_alloc
 #endif
-#ifndef JSGEN_FREE
-#define JSGEN_FREE free
-#endif
+
+typedef void* (*JsGenMalloc)(size_t size);
 
 // Generate JSON serialization/deserialization code for C struct.
 #define JSGEN_JSON
@@ -58,54 +62,6 @@ JSON typedef struct {
 // Define a field as a JSON literal string, type must be char*.
 #define jsgen_json_literal
 
-typedef struct JsGenRegion {
-    size_t count;
-    size_t capacity;
-    struct JsGenRegion *next;
-    uintptr_t items[];
-} JsGenRegion;
-
-#define ALL_REGION_MIN_SIZE (4096 - sizeof(JsGenRegion))
-typedef struct {
-    JsGenRegion *start, *end;
-} JsGenAllocator;
-
-void *jsgen_malloc(JsGenAllocator *a, size_t size);
-void jsgen_free(JsGenAllocator *a);
-
-void *jsgen_malloc(JsGenAllocator *a, size_t size) {
-    if (size == 0) return NULL;
-    size = (size + sizeof(uintptr_t) - 1) & ~(sizeof(uintptr_t) - 1);
-    if (!a->end || a->end->count + size > a->end->capacity) {
-        size_t region_size = sizeof(JsGenRegion) + (size > ALL_REGION_MIN_SIZE ? size : ALL_REGION_MIN_SIZE);
-        JsGenRegion *r = JSGEN_MALLOC(region_size);
-        if (!r) return NULL;
-        r->count = 0;
-        r->capacity = region_size - sizeof(JsGenRegion);
-        r->next = NULL;
-        if (a->end) {
-            a->end->next = r;
-            a->end = r;
-        } else {
-            a->start = a->end = r;
-        }
-    }
-    void *ptr = (void *)((uintptr_t)a->end->items + a->end->count);
-    a->end->count += size;
-    memset(ptr, 0, size);
-    return ptr;
-}
-
-void jsgen_free(JsGenAllocator *a) {
-    JsGenRegion *r = a->start;
-    while (r) {
-        JsGenRegion *next = r->next;
-        JSGEN_FREE(r);
-        r = next;
-    }
-    a->start = a->end = NULL;
-}
-
 #ifndef JSGEN_NO_STRIP
 // Generate JSON serialization/deserialization code for C struct. Alias for JSGEN_JSON
 #define JSON JSGEN_JSON
@@ -119,7 +75,24 @@ void jsgen_free(JsGenAllocator *a) {
 #define alias jsgen_alias
 // Region allocator for JSON parsing/stringifying. Alias for JsGenAllocator
 #define json_literal jsgen_json_literal
-#define Allocator JsGenAllocator
 #endif // JSGEN_NO_STRIP
 
 #endif // JSGEN_H
+
+#ifdef JSGEN_IMPLEMENTATION
+static unsigned char jsgen__basic_alloc[JSGEN_BASIC_ALLOC_SIZE] = {0};
+static size_t jsgen__basic_alloc_size;
+
+void *jsgen_basic_alloc(size_t size) {
+    if(size > JSGEN_BASIC_ALLOC_SIZE - jsgen__basic_alloc_size) {
+        return NULL;
+    }
+    void *ptr = jsgen__basic_alloc + jsgen__basic_alloc_size;
+    jsgen__basic_alloc_size += size;
+    return ptr;
+}
+
+void jsgen_free() {
+    jsgen__basic_alloc_size = 0;
+}
+#endif // JSGEN_IMPLEMENTATION
