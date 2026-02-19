@@ -1215,7 +1215,7 @@ void ds_simple_log_handler(int level, const char *fmt, ...) {
             break;
         }
         vfprintf(log_file, fmt, args);
-        fflush(log_file);
+        fputc('\n', log_file);
         va_end(args);
     }
 }
@@ -1242,7 +1242,7 @@ void ds_color_log_handler(int level, const char *fmt, ...) {
         break;
     }
     vfprintf(log_file, fmt, args);
-    fflush(log_file);
+    fputc('\n', log_file);
     va_end(args);
 }
 
@@ -1713,6 +1713,7 @@ DIR *opendir(const char *path) {
     char buffer[MAX_PATH];
     snprintf(buffer, MAX_PATH, "%s\\*", path);
     DIR *dir = (DIR *)DS_ALLOC(sizeof(DIR));
+    if (!dir) return NULL;
 
     dir->hFind = FindFirstFile(buffer, &dir->data);
     if (dir->hFind == INVALID_HANDLE_VALUE) {
@@ -1728,6 +1729,7 @@ struct dirent *readdir(DIR *dir) {
 
     if (dir->dirent == NULL) {
         dir->dirent = DS_ALLOC(sizeof(struct dirent));
+        assert(dir->dirent != NULL);
     } else if (!FindNextFile(dir->hFind, &dir->data)) {
         return NULL;
     }
