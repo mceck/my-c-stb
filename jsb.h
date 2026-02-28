@@ -55,7 +55,9 @@
 #ifndef JSB_H_
 #define JSB_H_
 
+#include <assert.h>
 #include <stdbool.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
@@ -249,7 +251,7 @@ static int jsb_check_val(Jsb *jsb) {
  */
 static void jsb_pretty_print_ch(Jsb *jsb) {
     if (jsb->pp && !jsb->is_key) {
-        jsb_sappend(&jsb->buffer, '\n');
+        if (jsb->buffer.count > 0) jsb_sappend(&jsb->buffer, '\n');
         for (int i = 0; i < jsb->level * jsb->pp; ++i) {
             jsb_sappend(&jsb->buffer, ' ');
         }
