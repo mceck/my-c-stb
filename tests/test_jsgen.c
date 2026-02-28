@@ -374,6 +374,57 @@ void test_tagged_roundtrip(void) {
 }
 
 // ============================================================================
+// ThemeModel (non-typedef struct) tests
+// ============================================================================
+
+void test_theme_parse(void) {
+    TEST("theme: parse with non-typedef struct color pointers");
+    const char *json = "{\"name\": \"dark\", \"fg\": {\"r\": 255, \"g\": 255, \"b\": 255}, \"bg\": {\"r\": 0, \"g\": 0, \"b\": 0}}";
+    ThemeModel m = {0};
+    ASSERT_EQ(parse_ThemeModel(json, &m), 0, "parse failed");
+    ASSERT_STR(m.name, "dark", "name");
+    ASSERT_NEQ(m.fg, NULL, "fg not NULL");
+    ASSERT_EQ(m.fg->r, 255, "fg.r");
+    ASSERT_EQ(m.fg->g, 255, "fg.g");
+    ASSERT_EQ(m.fg->b, 255, "fg.b");
+    ASSERT_NEQ(m.bg, NULL, "bg not NULL");
+    ASSERT_EQ(m.bg->r, 0, "bg.r");
+    jsgen_free();
+    PASS();
+}
+
+void test_theme_roundtrip(void) {
+    TEST("theme: stringify -> parse roundtrip");
+    struct color fg = {.r = 100, .g = 150, .b = 200};
+    struct color bg = {.r = 10, .g = 20, .b = 30};
+    ThemeModel m = {.name = "custom", .fg = &fg, .bg = &bg};
+    char *json = stringify_ThemeModel(&m);
+    ASSERT_NEQ(json, NULL, "stringify returned NULL");
+
+    ThemeModel m2 = {0};
+    ASSERT_EQ(parse_ThemeModel(json, &m2), 0, "re-parse failed");
+    ASSERT_STR(m2.name, "custom", "name");
+    ASSERT_EQ(m2.fg->r, 100, "fg.r");
+    ASSERT_EQ(m2.fg->g, 150, "fg.g");
+    ASSERT_EQ(m2.bg->b, 30, "bg.b");
+    free(json);
+    jsgen_free();
+    PASS();
+}
+
+void test_theme_null_pointer(void) {
+    TEST("theme: parse with null fg");
+    const char *json = "{\"name\": \"none\", \"fg\": null, \"bg\": {\"r\": 1, \"g\": 2, \"b\": 3}}";
+    ThemeModel m = {0};
+    ASSERT_EQ(parse_ThemeModel(json, &m), 0, "parse failed");
+    ASSERT_EQ(m.fg, NULL, "fg should be NULL");
+    ASSERT_NEQ(m.bg, NULL, "bg not NULL");
+    ASSERT_EQ(m.bg->r, 1, "bg.r");
+    jsgen_free();
+    PASS();
+}
+
+// ============================================================================
 // IgnoreModel tests
 // ============================================================================
 
@@ -659,6 +710,97 @@ void test_whitespace_json(void) {
 }
 
 // ============================================================================
+// IntArrayModel (sized_by primitive array)
+// ============================================================================
+
+void test_int_array_parse(void) {
+    TEST("int array: parse sized_by int array");
+    const char *json = "{\"values\": [10, 20, 30, 40, 50], \"value_count\": 5}";
+    IntArrayModel m = {0};
+    ASSERT_EQ(parse_IntArrayModel(json, &m), 0, "parse failed");
+    ASSERT_EQ((int)m.value_count, 5, "value_count");
+    ASSERT_NEQ(m.values, NULL, "values not NULL");
+    ASSERT_EQ(m.values[0], 10, "values[0]");
+    ASSERT_EQ(m.values[1], 20, "values[1]");
+    ASSERT_EQ(m.values[2], 30, "values[2]");
+    ASSERT_EQ(m.values[3], 40, "values[3]");
+    ASSERT_EQ(m.values[4], 50, "values[4]");
+    jsgen_free();
+    PASS();
+}
+
+void test_int_array_empty(void) {
+    TEST("int array: parse empty array");
+    const char *json = "{\"values\": [], \"value_count\": 0}";
+    IntArrayModel m = {0};
+    ASSERT_EQ(parse_IntArrayModel(json, &m), 0, "parse failed");
+    ASSERT_EQ((int)m.value_count, 0, "value_count");
+    jsgen_free();
+    PASS();
+}
+
+void test_int_array_stringify(void) {
+    TEST("int array: stringify");
+    int vals[] = {1, 2, 3};
+    IntArrayModel m = {.values = vals, .value_count = 3};
+    char *json = stringify_IntArrayModel(&m);
+    ASSERT_NEQ(json, NULL, "stringify returned NULL");
+    // Verify it contains the array
+    ASSERT_NEQ(strstr(json, "["), NULL, "has array open");
+    ASSERT_NEQ(strstr(json, "1"), NULL, "has 1");
+    ASSERT_NEQ(strstr(json, "2"), NULL, "has 2");
+    ASSERT_NEQ(strstr(json, "3"), NULL, "has 3");
+    free(json);
+    PASS();
+}
+
+void test_int_array_roundtrip(void) {
+    TEST("int array: stringify -> parse roundtrip");
+    int vals[] = {-5, 0, 100, 999};
+    IntArrayModel m = {.values = vals, .value_count = 4};
+    char *json = stringify_IntArrayModel(&m);
+    ASSERT_NEQ(json, NULL, "stringify returned NULL");
+    IntArrayModel m2 = {0};
+    ASSERT_EQ(parse_IntArrayModel(json, &m2), 0, "re-parse failed");
+    ASSERT_EQ((int)m2.value_count, 4, "value_count");
+    ASSERT_EQ(m2.values[0], -5, "values[0]");
+    ASSERT_EQ(m2.values[1], 0, "values[1]");
+    ASSERT_EQ(m2.values[2], 100, "values[2]");
+    ASSERT_EQ(m2.values[3], 999, "values[3]");
+    free(json);
+    jsgen_free();
+    PASS();
+}
+
+void test_double_array_roundtrip(void) {
+    TEST("double array: stringify -> parse roundtrip");
+    double vals[] = {1.5, 2.7, 3.14};
+    DoubleArrayModel m = {.scores = vals, .score_count = 3};
+    char *json = stringify_DoubleArrayModel(&m);
+    ASSERT_NEQ(json, NULL, "stringify returned NULL");
+    DoubleArrayModel m2 = {0};
+    ASSERT_EQ(parse_DoubleArrayModel(json, &m2), 0, "re-parse failed");
+    ASSERT_EQ((int)m2.score_count, 3, "score_count");
+    ASSERT(fabs(m2.scores[0] - 1.5) < 0.01, "scores[0]");
+    ASSERT(fabs(m2.scores[1] - 2.7) < 0.01, "scores[1]");
+    ASSERT(fabs(m2.scores[2] - 3.14) < 0.01, "scores[2]");
+    free(json);
+    jsgen_free();
+    PASS();
+}
+
+void test_int_array_null_values(void) {
+    TEST("int array: stringify with NULL values");
+    IntArrayModel m = {.values = NULL, .value_count = 0};
+    char *json = stringify_IntArrayModel(&m);
+    ASSERT_NEQ(json, NULL, "stringify returned NULL");
+    // values should not appear in output since pointer is NULL
+    ASSERT_EQ(strstr(json, "values"), NULL, "values not in output");
+    free(json);
+    PASS();
+}
+
+// ============================================================================
 // Main
 // ============================================================================
 
@@ -693,6 +835,11 @@ int main(void) {
     test_tagged_empty_tags();
     test_tagged_roundtrip();
 
+    SECTION("ThemeModel (non-typedef struct pointer)");
+    test_theme_parse();
+    test_theme_roundtrip();
+    test_theme_null_pointer();
+
     SECTION("IgnoreModel");
     test_ignore_stringify();
     test_ignore_parse();
@@ -713,6 +860,14 @@ int main(void) {
     test_dual_both_present();
     test_dual_work_null();
     test_dual_stringify_roundtrip();
+
+    SECTION("IntArrayModel (sized_by primitive array)");
+    test_int_array_parse();
+    test_int_array_empty();
+    test_int_array_stringify();
+    test_int_array_roundtrip();
+    test_double_array_roundtrip();
+    test_int_array_null_values();
 
     SECTION("Edge cases & errors");
     test_invalid_json();

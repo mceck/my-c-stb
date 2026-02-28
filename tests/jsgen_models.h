@@ -49,6 +49,19 @@ JSON typedef struct {
     size_t tag_count;
 } TaggedModel;
 
+// Non-typedef struct (uses "struct" keyword)
+JSON struct color {
+    int r;
+    int g;
+    int b;
+};
+
+JSON typedef struct {
+    char *name;
+    struct color *fg;
+    struct color *bg;
+} ThemeModel;
+
 // Struct with ignored field
 JSON typedef struct {
     int id;
@@ -91,5 +104,16 @@ JSON typedef struct {
     Address *home;
     Address *work; // can be null
 } DualAddressModel;
+
+// Struct with sized_by array of primitives
+JSON typedef struct {
+    int *values sized_by("value_count");
+    size_t value_count;
+} IntArrayModel;
+
+JSON typedef struct {
+    double *scores sized_by("score_count");
+    size_t score_count;
+} DoubleArrayModel;
 
 #endif // JSGEN_MODELS_H

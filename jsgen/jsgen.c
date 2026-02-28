@@ -256,10 +256,21 @@ int parse_file(const char *filename, Models *models) {
     return 0;
 }
 
+// Returns the base type for sizeof (e.g. "struct address*" -> "struct address")
+const char *get_sizeof_type(Field *field) {
+    static char buf[128];
+    strncpy(buf, field->type, sizeof(buf) - 1);
+    buf[sizeof(buf) - 1] = '\0';
+    int len = strlen(buf);
+    if (len > 0 && buf[len - 1] == '*') buf[--len] = '\0';
+    while (len > 0 && buf[len - 1] == ' ') buf[--len] = '\0';
+    return buf;
+}
+
 void gen_parse_field_body(String *sb, Field *field, int indent) {
     const char *jsp_type = get_jsp_type(field->type);
 
-    if (jsp_type) {
+    if (jsp_type && !field->is_array) {
         sb_cat_line(sb, indent, "err = jsp_value(jsp);");
         sb_cat_line(sb, indent, "if (err) return err;");
         if (strcmp(jsp_type, "string") == 0) {
@@ -301,7 +312,7 @@ void gen_parse_field_body(String *sb, Field *field, int indent) {
         if (field->has_counter) {
             sb_cat_line(sb, indent, "size_t len = jsp_array_length(jsp);");
             sb_cat_line(sb, indent, "out->", field->counter_field, " = len;");
-            sb_cat_line(sb, indent, "out->", field->name, " = jsgen_malloc(sizeof(", field->simple_type, ") * len);");
+            sb_cat_line(sb, indent, "out->", field->name, " = jsgen_malloc(sizeof(", get_sizeof_type(field), ") * len);");
             sb_cat_line(sb, indent, "for (size_t i = 0; i < len; i++) {");
         } else {
             sb_cat_line(sb, indent, "size_t i = 0;");
@@ -327,7 +338,7 @@ void gen_parse_field_body(String *sb, Field *field, int indent) {
         sb_cat_line(sb, indent, "if (!err && jsp->type == JSP_TYPE_NULL) {");
         sb_cat_line(sb, indent + 1, "out->", field->name, " = NULL;");
         sb_cat_line(sb, indent, "} else {");
-        sb_cat_line(sb, indent + 1, "out->", field->name, " = jsgen_malloc(sizeof(", field->simple_type, "));");
+        sb_cat_line(sb, indent + 1, "out->", field->name, " = jsgen_malloc(sizeof(", get_sizeof_type(field), "));");
         sb_cat_line(sb, indent + 1, "err = _parse_", field->simple_type, "(jsp, out->", field->name, ", jsgen_malloc);");
         sb_cat_line(sb, indent + 1, "if (err) return err;");
         sb_cat_line(sb, indent, "}");
@@ -347,7 +358,7 @@ void gen_stringify_field(String *sb, Field *field, int indent) {
     sb_cat_line(sb, indent, "if (jsb_key(jsb, \"", js_getalias(field), "\")) return -1;");
     const char *jsb_type = get_jsb_type(field->type);
 
-    if (jsb_type) {
+    if (jsb_type && !field->is_array) {
         if (field->is_json_literal) {
             sb_cat_line(sb, indent, "size_t plen = in->", field->name, " ? strlen(in->", field->name, ") : 0;");
             sb_cat_line(sb, indent, "if (plen > 0) {");
@@ -367,7 +378,7 @@ void gen_stringify_field(String *sb, Field *field, int indent) {
             sb_cat_line(sb, indent, "for (size_t i = 0; i < (size_t)in->", field->counter_field, "; ++i) {");
             const char *arr_jsb_type = get_jsb_type(field->simple_type);
             if (arr_jsb_type)
-                sb_cat_line(sb, indent + 1, "if (jsb_", arr_jsb_type, "(jsb, in->", field->name, "[i])) return -1;");
+                sb_cat_line(sb, indent + 1, "if (jsb_", arr_jsb_type, "(jsb, in->", field->name, "[i]", (strcmp(arr_jsb_type, "number") == 0 ? ", 5" : ""), ")) return -1;");
             else
                 sb_cat_line(sb, indent + 1, "if (_stringify_", field->simple_type, "(jsb, &in->", field->name, "[i])) return -1;");
             sb_cat_line(sb, indent, "}");

@@ -88,7 +88,7 @@ typedef struct {
 #define http_init() curl_global_init(CURL_GLOBAL_DEFAULT)
 #define http_cleanup() curl_global_cleanup()
 
-static CURLcode http_set_method(CURL *curl, const HttpMethod method);
+static CURLcode http_set_method(CURL *curl, const HttpMethod method, bool has_body);
 
 static CURLcode http_set_headers(CURL *curl, const HttpHeaders *headers, struct curl_slist **header_list);
 
@@ -116,9 +116,10 @@ HttpResponse http_request_opts(const char *url, HttpRequestOpts opts);
 #endif // HTTP_H_
 
 #ifdef HTTP_IMPLEMENTATION
-static CURLcode http_set_method(CURL *curl, const HttpMethod method) {
+static CURLcode http_set_method(CURL *curl, const HttpMethod method, bool has_body) {
     switch (method) {
     case HTTP_GET:
+        if (has_body) return curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, "GET");
         return curl_easy_setopt(curl, CURLOPT_HTTPGET, 1L);
     case HTTP_POST:
         return curl_easy_setopt(curl, CURLOPT_POST, 1L);
@@ -133,15 +134,15 @@ static CURLcode http_set_method(CURL *curl, const HttpMethod method) {
     default:
         return curl_easy_setopt(curl, CURLOPT_NOBODY, 1L);
     }
-    return CURLE_UNSUPPORTED_PROTOCOL;
 }
 
 static CURLcode http_set_headers(CURL *curl, const HttpHeaders *headers, struct curl_slist **header_list) {
     for (size_t i = 0; i < headers->length; i++) {
-        *header_list = curl_slist_append(*header_list, headers->data[i]);
+        struct curl_slist *tmp = curl_slist_append(*header_list, headers->data[i]);
+        if (!tmp) return CURLE_OUT_OF_MEMORY;
+        *header_list = tmp;
     }
-    CURLcode res = curl_easy_setopt(curl, CURLOPT_HTTPHEADER, *header_list);
-    return res;
+    return curl_easy_setopt(curl, CURLOPT_HTTPHEADER, *header_list);
 }
 
 static size_t write_callback(const char *contents, size_t total, HttpStreamContext *ctx) {
@@ -170,8 +171,8 @@ HttpResponse http_request(const char *url, const HttpMethod method, const HttpHe
     if (!curl) goto cleanup;
     res = curl_easy_setopt(curl, CURLOPT_URL, url);
     if (res) goto cleanup;
-    res = http_set_method(curl, method);
-    if (res) goto cleanup;
+    curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
+    curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 30L);
     if (headers) {
         res = http_set_headers(curl, headers, &header_list);
         if (res) goto cleanup;
@@ -180,6 +181,8 @@ HttpResponse http_request(const char *url, const HttpMethod method, const HttpHe
         res = curl_easy_setopt(curl, CURLOPT_POSTFIELDS, body);
         if (res) goto cleanup;
     }
+    res = http_set_method(curl, method, body != NULL);
+    if (res) goto cleanup;
 
     if (stream_callback) {
         stream_ctx.callback = stream_callback;
@@ -194,6 +197,9 @@ HttpResponse http_request(const char *url, const HttpMethod method, const HttpHe
 
     res = curl_easy_perform(curl);
     curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &response.status_code);
+    if (!res && !response.body.data) {
+        ds_str_append(&response.body);
+    }
 cleanup:
     if (header_list) curl_slist_free_all(header_list);
     if (curl) curl_easy_cleanup(curl);

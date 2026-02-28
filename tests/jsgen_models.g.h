@@ -692,6 +692,224 @@ char* stringify_TaggedModel_list_indent(TaggedModel *in, size_t count, int inden
 
 #define stringify_TaggedModel_list(in, count) stringify_TaggedModel_list_indent((in), (count), 0)
 
+int _parse_color(Jsp *jsp, struct color *out, JsGenMalloc jsgen_malloc) {
+    int err = jsp_begin_object(jsp);
+    if (err) return err;
+    while (jsp_key(jsp) == 0) {
+        if (strcmp(jsp->string, "r") == 0) {
+            err = jsp_value(jsp);
+            if (err) return err;
+            out->r = jsp->number;
+        } else if (strcmp(jsp->string, "g") == 0) {
+            err = jsp_value(jsp);
+            if (err) return err;
+            out->g = jsp->number;
+        } else if (strcmp(jsp->string, "b") == 0) {
+            err = jsp_value(jsp);
+            if (err) return err;
+            out->b = jsp->number;
+        } else {
+            err = jsp_skip(jsp);
+            if (err) return err;
+        }
+    }
+    err = jsp_end_object(jsp);
+    return err;
+}
+
+int parse_color_a(const char *json, struct color *out, JsGenMalloc jsgen_malloc) {
+    Jsp jsp = {0};
+    int err = jsp_init(&jsp, json, strlen(json));
+    if (err) return err;
+    err = _parse_color(&jsp, out, jsgen_malloc);
+    jsp_free(&jsp);
+    return err;
+}
+
+#define parse_color(json, out) parse_color_a((json), (out), JSGEN_MALLOC)
+
+int _parse_color_list(Jsp *jsp, struct color **out, size_t *out_count, JsGenMalloc jsgen_malloc) {
+    int err = jsp_begin_array(jsp);
+    if (err) return err;
+    size_t len = jsp_array_length(jsp);
+    *out_count = len;
+    *out = jsgen_malloc(sizeof(struct color) * len);
+    for (size_t i = 0; i < len; i++) {
+        err = _parse_color(jsp, &(*out)[i], jsgen_malloc);
+        if (err) return err;
+    }
+    err = jsp_end_array(jsp);
+    if (err) { *out = NULL; *out_count = 0; }
+    return err;
+}
+int parse_color_list_a(const char *json, struct color **out, size_t *out_count, JsGenMalloc jsgen_malloc) {
+    Jsp jsp = {0};
+    int err = jsp_init(&jsp, json, strlen(json));
+    if (err) return err;
+    err = _parse_color_list(&jsp, out, out_count, jsgen_malloc);
+    jsp_free(&jsp);
+    return err;
+}
+
+#define parse_color_list(json, out, out_count) parse_color_list_a((json), (out), (out_count), JSGEN_MALLOC)
+
+int _stringify_color(Jsb *jsb, struct color *in) {
+    if (jsb_begin_object(jsb)) return -1;
+    {
+        if (jsb_key(jsb, "r")) return -1;
+        if (jsb_int(jsb, in->r)) return -1;
+        if (jsb_key(jsb, "g")) return -1;
+        if (jsb_int(jsb, in->g)) return -1;
+        if (jsb_key(jsb, "b")) return -1;
+        if (jsb_int(jsb, in->b)) return -1;
+    }
+    return jsb_end_object(jsb);
+}
+
+char* stringify_color_indent(struct color *in, int indent) {
+    Jsb jsb = {.pp = indent};
+    if(_stringify_color(&jsb, in)) {
+        jsb_free(&jsb);
+        return NULL;
+    }
+    return jsb_get(&jsb);
+}
+
+#define stringify_color(in) stringify_color_indent((in), 0)
+
+char* stringify_color_list_indent(struct color *in, size_t count, int indent) {
+    Jsb jsb = {.pp = indent};
+    if (jsb_begin_array(&jsb)) return NULL;
+    for (size_t i = 0; i < count; i++) {
+        if (_stringify_color(&jsb, &in[i])) return NULL;
+    }
+    if (jsb_end_array(&jsb)) return NULL;
+    return jsb_get(&jsb);
+}
+
+#define stringify_color_list(in, count) stringify_color_list_indent((in), (count), 0)
+
+int _parse_ThemeModel(Jsp *jsp, ThemeModel *out, JsGenMalloc jsgen_malloc) {
+    int err = jsp_begin_object(jsp);
+    if (err) return err;
+    while (jsp_key(jsp) == 0) {
+        if (strcmp(jsp->string, "name") == 0) {
+            err = jsp_value(jsp);
+            if (err) return err;
+            size_t s_len = jsp->string ? strlen(jsp->string) : 0;
+            if(s_len > 0) {
+                out->name = jsgen_malloc(s_len + 1);
+                strcpy(out->name, jsp->string);
+            } else {
+                out->name = NULL;
+            }
+        } else if (strcmp(jsp->string, "fg") == 0) {
+            err = jsp_value(jsp);
+            if (!err && jsp->type == JSP_TYPE_NULL) {
+                out->fg = NULL;
+            } else {
+                out->fg = jsgen_malloc(sizeof(struct color));
+                err = _parse_color(jsp, out->fg, jsgen_malloc);
+                if (err) return err;
+            }
+        } else if (strcmp(jsp->string, "bg") == 0) {
+            err = jsp_value(jsp);
+            if (!err && jsp->type == JSP_TYPE_NULL) {
+                out->bg = NULL;
+            } else {
+                out->bg = jsgen_malloc(sizeof(struct color));
+                err = _parse_color(jsp, out->bg, jsgen_malloc);
+                if (err) return err;
+            }
+        } else {
+            err = jsp_skip(jsp);
+            if (err) return err;
+        }
+    }
+    err = jsp_end_object(jsp);
+    return err;
+}
+
+int parse_ThemeModel_a(const char *json, ThemeModel *out, JsGenMalloc jsgen_malloc) {
+    Jsp jsp = {0};
+    int err = jsp_init(&jsp, json, strlen(json));
+    if (err) return err;
+    err = _parse_ThemeModel(&jsp, out, jsgen_malloc);
+    jsp_free(&jsp);
+    return err;
+}
+
+#define parse_ThemeModel(json, out) parse_ThemeModel_a((json), (out), JSGEN_MALLOC)
+
+int _parse_ThemeModel_list(Jsp *jsp, ThemeModel **out, size_t *out_count, JsGenMalloc jsgen_malloc) {
+    int err = jsp_begin_array(jsp);
+    if (err) return err;
+    size_t len = jsp_array_length(jsp);
+    *out_count = len;
+    *out = jsgen_malloc(sizeof(ThemeModel) * len);
+    for (size_t i = 0; i < len; i++) {
+        err = _parse_ThemeModel(jsp, &(*out)[i], jsgen_malloc);
+        if (err) return err;
+    }
+    err = jsp_end_array(jsp);
+    if (err) { *out = NULL; *out_count = 0; }
+    return err;
+}
+int parse_ThemeModel_list_a(const char *json, ThemeModel **out, size_t *out_count, JsGenMalloc jsgen_malloc) {
+    Jsp jsp = {0};
+    int err = jsp_init(&jsp, json, strlen(json));
+    if (err) return err;
+    err = _parse_ThemeModel_list(&jsp, out, out_count, jsgen_malloc);
+    jsp_free(&jsp);
+    return err;
+}
+
+#define parse_ThemeModel_list(json, out, out_count) parse_ThemeModel_list_a((json), (out), (out_count), JSGEN_MALLOC)
+
+int _stringify_ThemeModel(Jsb *jsb, ThemeModel *in) {
+    if (jsb_begin_object(jsb)) return -1;
+    {
+        if (in->name != NULL) {
+            if (jsb_key(jsb, "name")) return -1;
+            if (jsb_string(jsb, in->name)) return -1;
+  }
+        if (in->fg != NULL) {
+            if (jsb_key(jsb, "fg")) return -1;
+            if (in->fg == NULL) jsb_null(jsb);
+            else if (_stringify_color(jsb, in->fg)) return -1;
+  }
+        if (in->bg != NULL) {
+            if (jsb_key(jsb, "bg")) return -1;
+            if (in->bg == NULL) jsb_null(jsb);
+            else if (_stringify_color(jsb, in->bg)) return -1;
+  }
+    }
+    return jsb_end_object(jsb);
+}
+
+char* stringify_ThemeModel_indent(ThemeModel *in, int indent) {
+    Jsb jsb = {.pp = indent};
+    if(_stringify_ThemeModel(&jsb, in)) {
+        jsb_free(&jsb);
+        return NULL;
+    }
+    return jsb_get(&jsb);
+}
+
+#define stringify_ThemeModel(in) stringify_ThemeModel_indent((in), 0)
+
+char* stringify_ThemeModel_list_indent(ThemeModel *in, size_t count, int indent) {
+    Jsb jsb = {.pp = indent};
+    if (jsb_begin_array(&jsb)) return NULL;
+    for (size_t i = 0; i < count; i++) {
+        if (_stringify_ThemeModel(&jsb, &in[i])) return NULL;
+    }
+    if (jsb_end_array(&jsb)) return NULL;
+    return jsb_get(&jsb);
+}
+
+#define stringify_ThemeModel_list(in, count) stringify_ThemeModel_list_indent((in), (count), 0)
+
 int _parse_IgnoreModel(Jsp *jsp, IgnoreModel *out, JsGenMalloc jsgen_malloc) {
     int err = jsp_begin_object(jsp);
     if (err) return err;
@@ -1290,5 +1508,205 @@ char* stringify_DualAddressModel_list_indent(DualAddressModel *in, size_t count,
 }
 
 #define stringify_DualAddressModel_list(in, count) stringify_DualAddressModel_list_indent((in), (count), 0)
+
+int _parse_IntArrayModel(Jsp *jsp, IntArrayModel *out, JsGenMalloc jsgen_malloc) {
+    int err = jsp_begin_object(jsp);
+    if (err) return err;
+    while (jsp_key(jsp) == 0) {
+        if (strcmp(jsp->string, "values") == 0) {
+            err = jsp_begin_array(jsp);
+            if (err) return err;
+            size_t len = jsp_array_length(jsp);
+            out->value_count = len;
+            out->values = jsgen_malloc(sizeof(int) * len);
+            for (size_t i = 0; i < len; i++) {
+                err = jsp_value(jsp);
+                if (err) break;
+                out->values[i] = jsp->number;
+            }
+            err = jsp_end_array(jsp);
+            if (err) return err;
+        } else {
+            err = jsp_skip(jsp);
+            if (err) return err;
+        }
+    }
+    err = jsp_end_object(jsp);
+    return err;
+}
+
+int parse_IntArrayModel_a(const char *json, IntArrayModel *out, JsGenMalloc jsgen_malloc) {
+    Jsp jsp = {0};
+    int err = jsp_init(&jsp, json, strlen(json));
+    if (err) return err;
+    err = _parse_IntArrayModel(&jsp, out, jsgen_malloc);
+    jsp_free(&jsp);
+    return err;
+}
+
+#define parse_IntArrayModel(json, out) parse_IntArrayModel_a((json), (out), JSGEN_MALLOC)
+
+int _parse_IntArrayModel_list(Jsp *jsp, IntArrayModel **out, size_t *out_count, JsGenMalloc jsgen_malloc) {
+    int err = jsp_begin_array(jsp);
+    if (err) return err;
+    size_t len = jsp_array_length(jsp);
+    *out_count = len;
+    *out = jsgen_malloc(sizeof(IntArrayModel) * len);
+    for (size_t i = 0; i < len; i++) {
+        err = _parse_IntArrayModel(jsp, &(*out)[i], jsgen_malloc);
+        if (err) return err;
+    }
+    err = jsp_end_array(jsp);
+    if (err) { *out = NULL; *out_count = 0; }
+    return err;
+}
+int parse_IntArrayModel_list_a(const char *json, IntArrayModel **out, size_t *out_count, JsGenMalloc jsgen_malloc) {
+    Jsp jsp = {0};
+    int err = jsp_init(&jsp, json, strlen(json));
+    if (err) return err;
+    err = _parse_IntArrayModel_list(&jsp, out, out_count, jsgen_malloc);
+    jsp_free(&jsp);
+    return err;
+}
+
+#define parse_IntArrayModel_list(json, out, out_count) parse_IntArrayModel_list_a((json), (out), (out_count), JSGEN_MALLOC)
+
+int _stringify_IntArrayModel(Jsb *jsb, IntArrayModel *in) {
+    if (jsb_begin_object(jsb)) return -1;
+    {
+        if (in->values != NULL) {
+            if (jsb_key(jsb, "values")) return -1;
+            if (jsb_begin_array(jsb)) return -1;
+            for (size_t i = 0; i < (size_t)in->value_count; ++i) {
+                if (jsb_int(jsb, in->values[i])) return -1;
+            }
+            if (jsb_end_array(jsb)) return -1;
+  }
+    }
+    return jsb_end_object(jsb);
+}
+
+char* stringify_IntArrayModel_indent(IntArrayModel *in, int indent) {
+    Jsb jsb = {.pp = indent};
+    if(_stringify_IntArrayModel(&jsb, in)) {
+        jsb_free(&jsb);
+        return NULL;
+    }
+    return jsb_get(&jsb);
+}
+
+#define stringify_IntArrayModel(in) stringify_IntArrayModel_indent((in), 0)
+
+char* stringify_IntArrayModel_list_indent(IntArrayModel *in, size_t count, int indent) {
+    Jsb jsb = {.pp = indent};
+    if (jsb_begin_array(&jsb)) return NULL;
+    for (size_t i = 0; i < count; i++) {
+        if (_stringify_IntArrayModel(&jsb, &in[i])) return NULL;
+    }
+    if (jsb_end_array(&jsb)) return NULL;
+    return jsb_get(&jsb);
+}
+
+#define stringify_IntArrayModel_list(in, count) stringify_IntArrayModel_list_indent((in), (count), 0)
+
+int _parse_DoubleArrayModel(Jsp *jsp, DoubleArrayModel *out, JsGenMalloc jsgen_malloc) {
+    int err = jsp_begin_object(jsp);
+    if (err) return err;
+    while (jsp_key(jsp) == 0) {
+        if (strcmp(jsp->string, "scores") == 0) {
+            err = jsp_begin_array(jsp);
+            if (err) return err;
+            size_t len = jsp_array_length(jsp);
+            out->score_count = len;
+            out->scores = jsgen_malloc(sizeof(double) * len);
+            for (size_t i = 0; i < len; i++) {
+                err = jsp_value(jsp);
+                if (err) break;
+                out->scores[i] = jsp->number;
+            }
+            err = jsp_end_array(jsp);
+            if (err) return err;
+        } else {
+            err = jsp_skip(jsp);
+            if (err) return err;
+        }
+    }
+    err = jsp_end_object(jsp);
+    return err;
+}
+
+int parse_DoubleArrayModel_a(const char *json, DoubleArrayModel *out, JsGenMalloc jsgen_malloc) {
+    Jsp jsp = {0};
+    int err = jsp_init(&jsp, json, strlen(json));
+    if (err) return err;
+    err = _parse_DoubleArrayModel(&jsp, out, jsgen_malloc);
+    jsp_free(&jsp);
+    return err;
+}
+
+#define parse_DoubleArrayModel(json, out) parse_DoubleArrayModel_a((json), (out), JSGEN_MALLOC)
+
+int _parse_DoubleArrayModel_list(Jsp *jsp, DoubleArrayModel **out, size_t *out_count, JsGenMalloc jsgen_malloc) {
+    int err = jsp_begin_array(jsp);
+    if (err) return err;
+    size_t len = jsp_array_length(jsp);
+    *out_count = len;
+    *out = jsgen_malloc(sizeof(DoubleArrayModel) * len);
+    for (size_t i = 0; i < len; i++) {
+        err = _parse_DoubleArrayModel(jsp, &(*out)[i], jsgen_malloc);
+        if (err) return err;
+    }
+    err = jsp_end_array(jsp);
+    if (err) { *out = NULL; *out_count = 0; }
+    return err;
+}
+int parse_DoubleArrayModel_list_a(const char *json, DoubleArrayModel **out, size_t *out_count, JsGenMalloc jsgen_malloc) {
+    Jsp jsp = {0};
+    int err = jsp_init(&jsp, json, strlen(json));
+    if (err) return err;
+    err = _parse_DoubleArrayModel_list(&jsp, out, out_count, jsgen_malloc);
+    jsp_free(&jsp);
+    return err;
+}
+
+#define parse_DoubleArrayModel_list(json, out, out_count) parse_DoubleArrayModel_list_a((json), (out), (out_count), JSGEN_MALLOC)
+
+int _stringify_DoubleArrayModel(Jsb *jsb, DoubleArrayModel *in) {
+    if (jsb_begin_object(jsb)) return -1;
+    {
+        if (in->scores != NULL) {
+            if (jsb_key(jsb, "scores")) return -1;
+            if (jsb_begin_array(jsb)) return -1;
+            for (size_t i = 0; i < (size_t)in->score_count; ++i) {
+                if (jsb_number(jsb, in->scores[i], 5)) return -1;
+            }
+            if (jsb_end_array(jsb)) return -1;
+  }
+    }
+    return jsb_end_object(jsb);
+}
+
+char* stringify_DoubleArrayModel_indent(DoubleArrayModel *in, int indent) {
+    Jsb jsb = {.pp = indent};
+    if(_stringify_DoubleArrayModel(&jsb, in)) {
+        jsb_free(&jsb);
+        return NULL;
+    }
+    return jsb_get(&jsb);
+}
+
+#define stringify_DoubleArrayModel(in) stringify_DoubleArrayModel_indent((in), 0)
+
+char* stringify_DoubleArrayModel_list_indent(DoubleArrayModel *in, size_t count, int indent) {
+    Jsb jsb = {.pp = indent};
+    if (jsb_begin_array(&jsb)) return NULL;
+    for (size_t i = 0; i < count; i++) {
+        if (_stringify_DoubleArrayModel(&jsb, &in[i])) return NULL;
+    }
+    if (jsb_end_array(&jsb)) return NULL;
+    return jsb_get(&jsb);
+}
+
+#define stringify_DoubleArrayModel_list(in, count) stringify_DoubleArrayModel_list_indent((in), (count), 0)
 
 #endif // JSGEN_TESTS_JSGEN_MODELS_G_H
