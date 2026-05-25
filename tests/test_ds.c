@@ -1557,6 +1557,180 @@ void test_hs_sub_da(void) {
 }
 
 // ============================================================================
+// Shrink Tests
+// ============================================================================
+
+void test_da_shrink_basic(void) {
+    TEST("da: shrink reduces capacity to length");
+    IntArray a = {0};
+    for (int i = 0; i < 100; i++) ds_da_append(&a, i);
+    ASSERT(a.capacity > 50, "capacity should be > 50 before");
+    a.length = 10; // simulate removals
+    ds_da_shrink(&a);
+    ASSERT_EQ(a.length, 10, "length preserved");
+    ASSERT_EQ(a.capacity, 10, "capacity shrunk to length");
+    for (int i = 0; i < 10; i++) ASSERT_EQ(a.data[i], i, "data preserved");
+    ds_da_free(&a);
+    PASS();
+}
+
+void test_da_shrink_empty(void) {
+    TEST("da: shrink on empty frees memory");
+    IntArray a = {0};
+    for (int i = 0; i < 50; i++) ds_da_append(&a, i);
+    a.length = 0;
+    ds_da_shrink(&a);
+    ASSERT_EQ(a.length, 0, "length is 0");
+    ASSERT_EQ(a.capacity, 0, "capacity is 0");
+    ASSERT_EQ(a.data, NULL, "data is NULL");
+    ds_da_free(&a); // safe double-free
+    PASS();
+}
+
+void test_da_shrink_noop_when_fitted(void) {
+    TEST("da: shrink is noop when capacity == length");
+    IntArray a = {0};
+    for (int i = 0; i < 10; i++) ds_da_append(&a, i);
+    a.length = a.capacity; // pretend fully utilized
+    int *old_data = a.data;
+    size_t old_cap = a.capacity;
+    ds_da_shrink(&a);
+    ASSERT_EQ(a.capacity, old_cap, "capacity unchanged");
+    ASSERT_EQ(a.data, old_data, "data ptr unchanged (no realloc)");
+    ds_da_free(&a);
+    PASS();
+}
+
+void test_da_shrink_on_zero_init(void) {
+    TEST("da: shrink on zero-initialized da is safe");
+    IntArray a = {0};
+    ds_da_shrink(&a); // length=0, capacity=0, data=NULL
+    ASSERT_EQ(a.length, 0, "length 0");
+    ASSERT_EQ(a.capacity, 0, "capacity 0");
+    ASSERT_EQ(a.data, NULL, "data NULL");
+    PASS();
+}
+
+void test_hm_shrink_basic(void) {
+    TEST("hm: shrink reduces table+data after many removes");
+    IntIntMap hm = {0};
+    for (int i = 0; i < 1000; i++) ds_hm_set(&hm, i, i * 2);
+    size_t big_table = hm.table.capacity;
+    size_t big_cap = hm.capacity;
+    for (int i = 0; i < 990; i++) ds_hm_remove(&hm, i);
+    ASSERT_EQ(hm.length, 10, "10 entries left");
+    // before shrink, table/cap still large
+    ASSERT(hm.table.capacity == big_table, "table still big pre-shrink");
+    ASSERT(hm.capacity == big_cap, "data cap still big pre-shrink");
+    ds_hm_shrink(&hm);
+    ASSERT(hm.table.capacity < big_table, "table shrunk");
+    ASSERT(hm.capacity < big_cap, "data cap shrunk");
+    ASSERT_EQ(hm.length, 10, "length unchanged");
+    // remaining keys still queryable
+    for (int i = 990; i < 1000; i++) {
+        ASSERT_EQ(ds_hm_get(&hm, i), i * 2, "key still resolves");
+    }
+    ds_hm_free(&hm);
+    PASS();
+}
+
+void test_hm_shrink_empty_frees(void) {
+    TEST("hm: shrink on empty map frees everything");
+    IntIntMap hm = {0};
+    for (int i = 0; i < 100; i++) ds_hm_set(&hm, i, i);
+    for (int i = 0; i < 100; i++) ds_hm_remove(&hm, i);
+    ASSERT_EQ(hm.length, 0, "empty");
+    ds_hm_shrink(&hm);
+    ASSERT_EQ(hm.capacity, 0, "data cap 0");
+    ASSERT_EQ(hm.table.capacity, 0, "table cap 0");
+    ASSERT_EQ(hm.data, NULL, "data NULL");
+    ASSERT_EQ(hm.table.data, NULL, "table data NULL");
+    ds_hm_free(&hm); // safe
+    PASS();
+}
+
+void test_hm_shrink_then_insert(void) {
+    TEST("hm: insert after shrink works correctly");
+    IntIntMap hm = {0};
+    for (int i = 0; i < 500; i++) ds_hm_set(&hm, i, i);
+    for (int i = 0; i < 495; i++) ds_hm_remove(&hm, i);
+    ds_hm_shrink(&hm);
+    // re-insert and verify
+    for (int i = 0; i < 100; i++) ds_hm_set(&hm, i + 1000, i * 7);
+    ASSERT_EQ(hm.length, 105, "5 original + 100 new");
+    for (int i = 495; i < 500; i++) ASSERT_EQ(ds_hm_get(&hm, i), i, "original key intact");
+    for (int i = 0; i < 100; i++) ASSERT_EQ(ds_hm_get(&hm, i + 1000), i * 7, "new key resolves");
+    ds_hm_free(&hm);
+    PASS();
+}
+
+void test_hm_shrink_strings(void) {
+    TEST("hm: shrink works on string-keyed map");
+    StrIntMap hm = {0};
+    char buf[16];
+    char *keys[200];
+    for (int i = 0; i < 200; i++) {
+        snprintf(buf, sizeof(buf), "k%d", i);
+        keys[i] = strdup(buf);
+        ds_hm_set(&hm, keys[i], i);
+    }
+    for (int i = 0; i < 195; i++) ds_hm_remove(&hm, keys[i]);
+    ds_hm_shrink(&hm);
+    ASSERT_EQ(hm.length, 5, "5 left");
+    for (int i = 195; i < 200; i++) {
+        ASSERT_EQ(ds_hm_get(&hm, keys[i]), i, "string key resolves after shrink");
+    }
+    ds_hm_free(&hm);
+    for (int i = 0; i < 200; i++) free(keys[i]);
+    PASS();
+}
+
+void test_hs_shrink_basic(void) {
+    TEST("hs: shrink reduces table+data after many removes");
+    IntSet s = {0};
+    for (int i = 0; i < 1000; i++) ds_hs_add(&s, i);
+    size_t big_table = s.table.capacity;
+    size_t big_cap = s.capacity;
+    for (int i = 0; i < 995; i++) ds_hs_remove(&s, i);
+    ds_hs_shrink(&s);
+    ASSERT(s.table.capacity < big_table, "table shrunk");
+    ASSERT(s.capacity < big_cap, "data cap shrunk");
+    ASSERT_EQ(s.length, 5, "length unchanged");
+    for (int i = 995; i < 1000; i++) ASSERT(ds_hs_has(&s, i), "value still present");
+    ASSERT(!ds_hs_has(&s, 0), "removed value still absent");
+    ds_hs_free(&s);
+    PASS();
+}
+
+void test_hs_shrink_empty_frees(void) {
+    TEST("hs: shrink on empty set frees everything");
+    IntSet s = {0};
+    for (int i = 0; i < 100; i++) ds_hs_add(&s, i);
+    for (int i = 0; i < 100; i++) ds_hs_remove(&s, i);
+    ds_hs_shrink(&s);
+    ASSERT_EQ(s.capacity, 0, "data cap 0");
+    ASSERT_EQ(s.table.capacity, 0, "table cap 0");
+    ASSERT_EQ(s.data, NULL, "data NULL");
+    ASSERT_EQ(s.table.data, NULL, "table data NULL");
+    ds_hs_free(&s);
+    PASS();
+}
+
+void test_hs_shrink_then_add(void) {
+    TEST("hs: add after shrink works correctly");
+    IntSet s = {0};
+    for (int i = 0; i < 500; i++) ds_hs_add(&s, i);
+    for (int i = 0; i < 495; i++) ds_hs_remove(&s, i);
+    ds_hs_shrink(&s);
+    for (int i = 0; i < 100; i++) ds_hs_add(&s, i + 1000);
+    ASSERT_EQ(s.length, 105, "5 + 100");
+    for (int i = 495; i < 500; i++) ASSERT(ds_hs_has(&s, i), "original present");
+    for (int i = 0; i < 100; i++) ASSERT(ds_hs_has(&s, i + 1000), "new present");
+    ds_hs_free(&s);
+    PASS();
+}
+
+// ============================================================================
 // Main
 // ============================================================================
 
@@ -1591,6 +1765,10 @@ int main(void) {
     test_da_free_idempotent();
     test_da_remove_edge_empty_array();
     test_da_large_struct();
+    test_da_shrink_basic();
+    test_da_shrink_empty();
+    test_da_shrink_noop_when_fitted();
+    test_da_shrink_on_zero_init();
 
     // String Builder
     SECTION("String Builder");
@@ -1635,6 +1813,10 @@ int main(void) {
     test_hm_negative_and_zero_keys();
     test_hm_string_key_overwrite();
     test_hm_collision_handling();
+    test_hm_shrink_basic();
+    test_hm_shrink_empty_frees();
+    test_hm_shrink_then_insert();
+    test_hm_shrink_strings();
 
     // Hash Set
     SECTION("Hash Set");
@@ -1650,6 +1832,9 @@ int main(void) {
     test_hs_to_da_and_back();
     test_hs_cat_da();
     test_hs_sub_da();
+    test_hs_shrink_basic();
+    test_hs_shrink_empty_frees();
+    test_hs_shrink_then_add();
 
     // Linked List
     SECTION("Linked List");
