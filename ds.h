@@ -323,7 +323,7 @@ typedef struct {
  */
 ds_da_declare(DsString, char);
 
-void _ds_str_append(DsString *str, ...);
+void ds__str_append(DsString *str, ...);
 
 /**
  * Append formatted string to a dynamic string builder.
@@ -344,7 +344,7 @@ void ds_str_prependf(DsString *str, const char *fmt, ...);
  * Example:
  *   `ds_str_append(&str, "Hello, ", "World", ...);`
  */
-#define ds_str_append(str, ...) _ds_str_append((str)__VA_OPT__(, ) __VA_ARGS__, NULL)
+#define ds_str_append(str, ...) ds__str_append((str)__VA_OPT__(, ) __VA_ARGS__, NULL)
 
 /**
  * Insert a string at a specific index in the string builder.
@@ -392,86 +392,76 @@ DsString *ds_str_rtrim(DsString *str);
 _Static_assert((DS_HM_INIT_CAPACITY & (DS_HM_INIT_CAPACITY - 1)) == 0,
                "DS_HM_INIT_CAPACITY must be a power of 2");
 
-struct ds_ht_idxs {
+struct ds__ht_idxs {
     size_t *data;
     size_t capacity;
+};
+
+/* Generic view over hashmap/hashset structs: ds_Hm and ds_Hs share this
+ * common initial sequence, so a pointer to either can be cast to ds_ht *. */
+struct ds__ht {
+    void *data;
+    size_t length;
+    size_t capacity;
+    struct ds__ht_idxs table;
+    size_t seed;
 };
 
 typedef size_t (*ds_entry_hash_fn)(const void *entry, size_t key_size, size_t seed);
 typedef int (*ds_entry_eq_fn)(const void *entry, const void *user_key, size_t key_size);
 
-size_t _ds_hash_string(const void *entry, size_t key_size, size_t seed);
-size_t _ds_hash_bytes(const void *entry, size_t key_size, size_t seed);
-int _ds_eq_str(const void *entry, const void *user_key, size_t key_size);
-int _ds_eq_bytes(const void *entry, const void *user_key, size_t key_size);
+size_t ds__hash_string(const void *entry, size_t key_size, size_t seed);
+size_t ds__hash_bytes(const void *entry, size_t key_size, size_t seed);
+int ds__eq_str(const void *entry, const void *user_key, size_t key_size);
+int ds__eq_bytes(const void *entry, const void *user_key, size_t key_size);
 
-bool _ds_table_find(
-    const struct ds_ht_idxs *table,
-    const void *data, size_t entry_size, size_t key_size,
-    const void *user_key, size_t key_hash,
-    ds_entry_eq_fn eq_fn,
-    size_t *out_slot, size_t *out_idx);
+bool ds__table_find(const struct ds__ht *ht, size_t entry_size, size_t key_size, const void *user_key, size_t key_hash, ds_entry_eq_fn eq_fn, size_t *out_slot, size_t *out_idx);
 
-void _ds_table_resize(
-    struct ds_ht_idxs *table,
-    const void *data, size_t length,
-    size_t entry_size, size_t key_size, size_t seed,
-    ds_entry_hash_fn hash_fn,
-    size_t new_capacity);
+void ds__table_resize(struct ds__ht *ht, size_t entry_size, size_t key_size, ds_entry_hash_fn hash_fn, size_t new_capacity);
 
-void _ds_table_remove_slot(
-    struct ds_ht_idxs *table,
-    const void *data, size_t length,
-    size_t entry_size, size_t key_size, size_t seed,
-    ds_entry_hash_fn hash_fn,
-    size_t slot, size_t idx);
+void ds__table_remove_slot(struct ds__ht *ht, size_t entry_size, size_t key_size, ds_entry_hash_fn hash_fn, size_t slot, size_t idx);
 
-#define _ds_entry_hfn(key)             \
+#define ds__ht_view(ht) ((struct ds__ht *)(void *)(ht))
+
+#define ds__entry_hfn(key)             \
     _Generic((key),                    \
-        char *: _ds_hash_string,       \
-        const char *: _ds_hash_string, \
-        default: _ds_hash_bytes)
+        char *: ds__hash_string,       \
+        const char *: ds__hash_string, \
+        default: ds__hash_bytes)
 
-#define _ds_entry_eqfn(key)       \
+#define ds__entry_eqfn(key)       \
     _Generic((key),               \
-        char *: _ds_eq_str,       \
-        const char *: _ds_eq_str, \
-        default: _ds_eq_bytes)
+        char *: ds__eq_str,       \
+        const char *: ds__eq_str, \
+        default: ds__eq_bytes)
 
-#define _ds_user_key_ptr(key) \
+#define ds__user_key_ptr(key) \
     _Generic((key), char *: (key), const char *: (key), default: &(key))
 
 /* shared helpers (hashmap and hashset have identical layout) */
-#define _ds_ht_should_resize(ht) \
+#define ds__ht_should_resize(ht) \
     ((ht)->length >= (ht)->table.capacity * DS_HM_LOAD_FACTOR)
 
-#define _ds_ht_resize(ht, _k)                                        \
-    _ds_table_resize(&(ht)->table, (ht)->data, (ht)->length,         \
-                     sizeof(*(ht)->data), sizeof(_k), (ht)->seed,    \
-                     _ds_entry_hfn(_k),                              \
-                     (ht)->table.capacity == 0 ? DS_HM_INIT_CAPACITY \
+#define ds__ht_resize(ht, _k)                                                       \
+    ds__table_resize(ds__ht_view(ht), sizeof(*(ht)->data), sizeof(_k),              \
+                     ds__entry_hfn(_k),                                             \
+                     (ht)->table.capacity == 0 ? DS_HM_INIT_CAPACITY                \
                                                : (ht)->table.capacity * 2)
 
-/* Smallest power-of-2 capacity that fits `length` under the load factor. */
-size_t _ds_ht_fit_capacity(size_t length);
+#define ds__ht_shrink_resize(ht, key_expr)                                          \
+    ds__table_resize(ds__ht_view(ht), sizeof(*(ht)->data), sizeof(key_expr),        \
+                     ds__entry_hfn(key_expr),                                       \
+                     ds__ht_fit_capacity((ht)->length))
 
-#define _ds_ht_shrink_resize(ht, key_expr)                              \
-    _ds_table_resize(&(ht)->table, (ht)->data, (ht)->length,            \
-                     sizeof(*(ht)->data), sizeof(key_expr), (ht)->seed, \
-                     _ds_entry_hfn(key_expr),                           \
-                     _ds_ht_fit_capacity((ht)->length))
+#define ds__ht_find(ht, _k, slot_p, idx_p)                                          \
+    ds__table_find(ds__ht_view(ht), sizeof(*(ht)->data), sizeof(_k),                \
+                   ds__user_key_ptr(_k),                                            \
+                   ds__entry_hfn(_k)(&(_k), sizeof(_k), (ht)->seed),                \
+                   ds__entry_eqfn(_k), (slot_p), (idx_p))
 
-#define _ds_ht_find(ht, _k, slot_p, idx_p)                           \
-    _ds_table_find(&(ht)->table, (ht)->data,                         \
-                   sizeof(*(ht)->data), sizeof(_k),                  \
-                   _ds_user_key_ptr(_k),                             \
-                   _ds_entry_hfn(_k)(&(_k), sizeof(_k), (ht)->seed), \
-                   _ds_entry_eqfn(_k), (slot_p), (idx_p))
-
-#define _ds_ht_remove_slot(ht, _k, slot, idx)                          \
-    _ds_table_remove_slot(&(ht)->table, (ht)->data, (ht)->length,      \
-                          sizeof(*(ht)->data), sizeof(_k), (ht)->seed, \
-                          _ds_entry_hfn(_k), (slot), (idx))
+#define ds__ht_remove_slot(ht, _k, slot, idx)                                       \
+    ds__table_remove_slot(ds__ht_view(ht), sizeof(*(ht)->data), sizeof(_k),         \
+                          ds__entry_hfn(_k), (slot), (idx))
 
 /**
  * Declare a hash map.
@@ -488,7 +478,7 @@ size_t _ds_ht_fit_capacity(size_t length);
     } *data;              // Dynamic array of key-value pairs
     size_t length;        // Number of elements
     size_t capacity;      // Capacity of data array
-    struct ds_ht_idxs table; // Hash table (stores indices+1 into data array)
+    struct ds__ht_idxs table; // Hash table (stores indices+1 into data array)
     size_t seed;          // Hash seed
  } my_map;
  ```
@@ -504,7 +494,7 @@ size_t _ds_ht_fit_capacity(size_t length);
         } *data;                 \
         size_t length;           \
         size_t capacity;         \
-        struct ds_ht_idxs table; \
+        struct ds__ht_idxs table; \
         size_t seed;             \
     }
 
@@ -524,9 +514,9 @@ ds_hm_declare(my_map, int, const char *);
     do {                                                                             \
         __typeof__((hm)->data[0].key) _k = (key_v);                                  \
         __typeof__((hm)->data[0].value) _v = (val_v);                                \
-        if (_ds_ht_should_resize(hm)) _ds_ht_resize(hm, _k);                         \
+        if (ds__ht_should_resize(hm)) ds__ht_resize(hm, _k);                         \
         size_t _slot, _idx;                                                          \
-        if (_ds_ht_find(hm, _k, &_slot, &_idx)) {                                    \
+        if (ds__ht_find(hm, _k, &_slot, &_idx)) {                                    \
             (hm)->data[_idx].value = _v;                                             \
         } else {                                                                     \
             ds_da_append((hm), ((__typeof__(*(hm)->data)){.key = _k, .value = _v})); \
@@ -549,7 +539,7 @@ ds_hm_declare(my_map, int, const char *);
     ({                                                                       \
         __typeof__((hm)->data[0].key) _k = (key_v);                          \
         size_t _slot, _idx;                                                  \
-        _ds_ht_find(hm, _k, &_slot, &_idx) ? &(hm)->data[_idx].value : NULL; \
+        ds__ht_find(hm, _k, &_slot, &_idx) ? &(hm)->data[_idx].value : NULL; \
     })
 
 #define ds_hm_has(hm, key_v) (ds_hm_try((hm), (key_v)) != NULL)
@@ -581,12 +571,12 @@ ds_hm_declare(my_map, int, const char *);
         __typeof__((hm)->data[0].key) _k = (key_v);            \
         __typeof__(&(hm)->data[0].value) _val = NULL;          \
         size_t _slot, _idx;                                    \
-        if (_ds_ht_find(hm, _k, &_slot, &_idx)) {              \
+        if (ds__ht_find(hm, _k, &_slot, &_idx)) {              \
             __typeof__((hm)->data[0]) _tmp = (hm)->data[_idx]; \
             ds_da_remove_unordered((hm), _idx);                \
             (hm)->data[(hm)->length] = _tmp;                   \
             _val = &(hm)->data[(hm)->length].value;            \
-            _ds_ht_remove_slot(hm, _k, _slot, _idx);           \
+            ds__ht_remove_slot(hm, _k, _slot, _idx);           \
         }                                                      \
         _val;                                                  \
     })
@@ -625,8 +615,8 @@ ds_hm_foreach(&hm, kv) {
         if ((hm)->length == 0) {                                            \
             ds_hm_free((hm));                                               \
         } else {                                                            \
-            if (_ds_ht_fit_capacity((hm)->length) < (hm)->table.capacity) { \
-                _ds_ht_shrink_resize((hm), (hm)->data[0].key);              \
+            if (ds__ht_fit_capacity((hm)->length) < (hm)->table.capacity) { \
+                ds__ht_shrink_resize((hm), (hm)->data[0].key);              \
             }                                                               \
             ds_da_shrink((hm));                                             \
         }                                                                   \
@@ -643,7 +633,7 @@ ds_hm_foreach(&hm, kv) {
     val_t *data;              // Dynamic array of values
     size_t length;            // Number of elements
     size_t capacity;          // Capacity of data array
-    struct ds_ht_idxs table; // Hash table (stores indices+1 into data array)
+    struct ds__ht_idxs table; // Hash table (stores indices+1 into data array)
     size_t seed;              // Hash seed
  } my_set;
  ```
@@ -655,7 +645,7 @@ ds_hm_foreach(&hm, kv) {
         val_t *data;             \
         size_t length;           \
         size_t capacity;         \
-        struct ds_ht_idxs table; \
+        struct ds__ht_idxs table; \
         size_t seed;             \
     }
 
@@ -676,7 +666,7 @@ ds_hm_foreach(&hm, kv) {
     ({                                         \
         __typeof__(*(set)->data) _k = (val_v); \
         size_t _slot, _idx;                    \
-        _ds_ht_find(set, _k, &_slot, &_idx);   \
+        ds__ht_find(set, _k, &_slot, &_idx);   \
     })
 
 /**
@@ -692,9 +682,9 @@ ds_hs_declare(my_set, int);
 #define ds_hs_add(set, val_v)                                  \
     do {                                                       \
         __typeof__(*(set)->data) _k = (val_v);                 \
-        if (_ds_ht_should_resize(set)) _ds_ht_resize(set, _k); \
+        if (ds__ht_should_resize(set)) ds__ht_resize(set, _k); \
         size_t _slot, _idx;                                    \
-        if (!_ds_ht_find(set, _k, &_slot, &_idx)) {            \
+        if (!ds__ht_find(set, _k, &_slot, &_idx)) {            \
             ds_da_append((set), _k);                           \
             (set)->table.data[_slot] = (set)->length;          \
         }                                                      \
@@ -711,10 +701,10 @@ ds_hs_declare(my_set, int);
     ({                                                     \
         __typeof__(*(set)->data) _k = (val_v);             \
         size_t _slot, _idx;                                \
-        bool _found = _ds_ht_find(set, _k, &_slot, &_idx); \
+        bool _found = ds__ht_find(set, _k, &_slot, &_idx); \
         if (_found) {                                      \
             ds_da_remove_unordered((set), _idx);           \
-            _ds_ht_remove_slot(set, _k, _slot, _idx);      \
+            ds__ht_remove_slot(set, _k, _slot, _idx);      \
         }                                                  \
         _found;                                            \
     })
@@ -815,8 +805,8 @@ ds_hs_foreach(&set, value) {
         if ((set)->length == 0) {                                             \
             ds_hs_free((set));                                                \
         } else {                                                              \
-            if (_ds_ht_fit_capacity((set)->length) < (set)->table.capacity) { \
-                _ds_ht_shrink_resize((set), *(set)->data);                    \
+            if (ds__ht_fit_capacity((set)->length) < (set)->table.capacity) { \
+                ds__ht_shrink_resize((set), *(set)->data);                    \
             }                                                                 \
             ds_da_shrink((set));                                              \
         }                                                                     \
@@ -1232,7 +1222,7 @@ void ds_set_log_handler(void (*handler)(int level, const char *fmt, ...)) {
     ds_log_handler = handler;
 }
 
-void _ds_str_append(DsString *str, ...) {
+void ds__str_append(DsString *str, ...) {
     va_list args;
     va_start(args, str);
     const char *cstr;
@@ -1328,7 +1318,7 @@ DsString *ds_str_rtrim(DsString *str) {
     return str;
 }
 
-size_t _ds_hash_string(const void *entry, size_t key_size, size_t seed) {
+size_t ds__hash_string(const void *entry, size_t key_size, size_t seed) {
     DS_UNUSED(key_size);
     const char *str = *(const char *const *)entry;
     if (!str || !*str) return seed ? seed : 0;
@@ -1344,7 +1334,7 @@ size_t _ds_hash_string(const void *entry, size_t key_size, size_t seed) {
     return hash;
 }
 
-size_t _ds_hash_bytes(const void *entry, size_t key_size, size_t seed) {
+size_t ds__hash_bytes(const void *entry, size_t key_size, size_t seed) {
     if (!entry || key_size == 0) return seed;
 
     const unsigned char *data = (const unsigned char *)entry;
@@ -1359,28 +1349,23 @@ size_t _ds_hash_bytes(const void *entry, size_t key_size, size_t seed) {
     return hash;
 }
 
-int _ds_eq_bytes(const void *entry, const void *user_key, size_t key_size) {
+int ds__eq_bytes(const void *entry, const void *user_key, size_t key_size) {
     return memcmp(entry, user_key, key_size) == 0;
 }
 
-int _ds_eq_str(const void *entry, const void *user_key, size_t key_size) {
+int ds__eq_str(const void *entry, const void *user_key, size_t key_size) {
     DS_UNUSED(key_size);
     const char *str = *(const char *const *)entry;
     return strcmp(str, (const char *)user_key) == 0;
 }
 
-bool _ds_table_find(
-    const struct ds_ht_idxs *table,
-    const void *data, size_t entry_size, size_t key_size,
-    const void *user_key, size_t key_hash,
-    ds_entry_eq_fn eq_fn,
-    size_t *out_slot, size_t *out_idx) {
-    if (!table->capacity) return false;
-    size_t mask = table->capacity - 1;
+bool ds__table_find(const struct ds__ht *ht, size_t entry_size, size_t key_size, const void *user_key, size_t key_hash, ds_entry_eq_fn eq_fn, size_t *out_slot, size_t *out_idx) {
+    if (!ht->table.capacity) return false;
+    size_t mask = ht->table.capacity - 1;
     size_t slot = key_hash & mask;
-    while (table->data[slot] != 0) {
-        size_t idx = table->data[slot] - 1;
-        const void *entry = (const char *)data + idx * entry_size;
+    while (ht->table.data[slot] != 0) {
+        size_t idx = ht->table.data[slot] - 1;
+        const void *entry = (const char *)ht->data + idx * entry_size;
         if (eq_fn(entry, user_key, key_size)) {
             *out_slot = slot;
             *out_idx = idx;
@@ -1392,7 +1377,7 @@ bool _ds_table_find(
     return false;
 }
 
-size_t _ds_ht_fit_capacity(size_t length) {
+size_t ds__ht_fit_capacity(size_t length) {
     size_t cap = DS_HM_INIT_CAPACITY;
     /* leave headroom for inserts after shrink: target load ~= 0.5 */
     size_t need = length * 2;
@@ -1401,59 +1386,49 @@ size_t _ds_ht_fit_capacity(size_t length) {
     return cap;
 }
 
-void _ds_table_resize(
-    struct ds_ht_idxs *table,
-    const void *data, size_t length,
-    size_t entry_size, size_t key_size, size_t seed,
-    ds_entry_hash_fn hash_fn,
-    size_t new_capacity) {
+void ds__table_resize(struct ds__ht *ht, size_t entry_size, size_t key_size, ds_entry_hash_fn hash_fn, size_t new_capacity) {
     assert((new_capacity & (new_capacity - 1)) == 0); /* must be power of 2 */
     size_t mask = new_capacity - 1;
     size_t *new_data = DS_ALLOC(new_capacity * sizeof(size_t));
     assert(new_data != NULL);
     memset(new_data, 0, new_capacity * sizeof(size_t));
-    for (size_t i = 0; i < length; i++) {
-        const void *entry = (const char *)data + i * entry_size;
-        size_t h = hash_fn(entry, key_size, seed) & mask;
+    for (size_t i = 0; i < ht->length; i++) {
+        const void *entry = (const char *)ht->data + i * entry_size;
+        size_t h = hash_fn(entry, key_size, ht->seed) & mask;
         while (new_data[h] != 0) {
             h = (h + 1) & mask;
         }
         new_data[h] = i + 1;
     }
-    DS_FREE(table->data);
-    table->data = new_data;
-    table->capacity = new_capacity;
+    DS_FREE(ht->table.data);
+    ht->table.data = new_data;
+    ht->table.capacity = new_capacity;
 }
 
-void _ds_table_remove_slot(
-    struct ds_ht_idxs *table,
-    const void *data, size_t length,
-    size_t entry_size, size_t key_size, size_t seed,
-    ds_entry_hash_fn hash_fn,
-    size_t slot, size_t idx) {
-    size_t mask = table->capacity - 1;
-    if (idx < length) {
-        const void *moved = (const char *)data + idx * entry_size;
-        size_t h = hash_fn(moved, key_size, seed) & mask;
-        while (table->data[h] != 0) {
-            if (table->data[h] - 1 == length) {
-                table->data[h] = idx + 1;
+void ds__table_remove_slot(struct ds__ht *ht, size_t entry_size, size_t key_size, ds_entry_hash_fn hash_fn, size_t slot, size_t idx) {
+    size_t mask = ht->table.capacity - 1;
+    if (idx < ht->length) {
+        const void *moved = (const char *)ht->data + idx * entry_size;
+        size_t h = hash_fn(moved, key_size, ht->seed) & mask;
+        while (ht->table.data[h] != 0) {
+            if (ht->table.data[h] - 1 == ht->length) {
+                ht->table.data[h] = idx + 1;
                 break;
             }
             h = (h + 1) & mask;
         }
     }
-    table->data[slot] = 0;
+    ht->table.data[slot] = 0;
     slot = (slot + 1) & mask;
-    while (table->data[slot] != 0) {
-        size_t i = table->data[slot] - 1;
-        table->data[slot] = 0;
-        const void *entry = (const char *)data + i * entry_size;
-        size_t h = hash_fn(entry, key_size, seed) & mask;
-        while (table->data[h] != 0) {
+    while (ht->table.data[slot] != 0) {
+        size_t i = ht->table.data[slot] - 1;
+        ht->table.data[slot] = 0;
+        const void *entry = (const char *)ht->data + i * entry_size;
+        size_t h = hash_fn(entry, key_size, ht->seed) & mask;
+        while (ht->table.data[h] != 0) {
             h = (h + 1) & mask;
         }
-        table->data[h] = i + 1;
+        ht->table.data[h] = i + 1;
         slot = (slot + 1) & mask;
     }
 }
