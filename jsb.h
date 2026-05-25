@@ -1,6 +1,6 @@
 /**
  * Simple JSON builder
- * https://github.com/mceck/c-stb
+ * https://github.com/mceck/my-c-stb
  *
  * Example:
 ```c

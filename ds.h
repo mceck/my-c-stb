@@ -1,6 +1,6 @@
 /**
  * ds - A simple and lightweight stb-style data structures and utilities library in C.
- * https://github.com/mceck/c-stb
+ * https://github.com/mceck/my-c-stb
  *
  * - Dynamic arrays
  * - String builder

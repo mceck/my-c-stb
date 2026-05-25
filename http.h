@@ -1,6 +1,6 @@
 /**
  * Simple HTTP Client using libcurl
- * https://github.com/mceck/c-stb
+ * https://github.com/mceck/my-c-stb
  *
  * Dependent on:
  * - libcurl, link with -lcurl (https://curl.se/libcurl/)
