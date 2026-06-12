@@ -601,6 +601,26 @@ void test_hm_string_keys(void) {
     PASS();
 }
 
+void test_hm_string_keys_are_copied(void) {
+    TEST("hm: string keys are copied on insert");
+    StrIntMap hm = {0};
+    char key[] = "mutable";
+
+    ds_hm_set(&hm, key, 42);
+    key[0] = 'M';
+
+    ASSERT_EQ(ds_hm_get(&hm, "mutable"), 42, "stored key survives source mutation");
+    ASSERT(!ds_hm_has(&hm, key), "mutated source is a different key");
+
+    int *removed = ds_hm_remove(&hm, "mutable");
+    ASSERT_NEQ(removed, NULL, "copied key can be removed by value");
+    ASSERT_EQ(*removed, 42, "removed value is preserved");
+    ASSERT(!ds_hm_has(&hm, "mutable"), "removed key is gone");
+
+    ds_hm_free(&hm);
+    PASS();
+}
+
 void test_hm_many_entries_triggers_resize(void) {
     TEST("hm: many entries trigger resize correctly");
     IntIntMap hm = {0};
@@ -1802,6 +1822,7 @@ int main(void) {
     test_hm_has();
     test_hm_get_missing();
     test_hm_string_keys();
+    test_hm_string_keys_are_copied();
     test_hm_many_entries_triggers_resize();
     test_hm_remove_basic();
     test_hm_remove_missing();
