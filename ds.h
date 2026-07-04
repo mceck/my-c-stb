@@ -1805,6 +1805,7 @@ DIR *opendir(const char *path) {
     snprintf(buffer, MAX_PATH, "%s\\*", path);
     DIR *dir = (DIR *)DS_ALLOC(sizeof(DIR));
     if (!dir) return NULL;
+    dir->dirent = NULL;
 
     dir->hFind = FindFirstFile(buffer, &dir->data);
     if (dir->hFind == INVALID_HANDLE_VALUE) {
